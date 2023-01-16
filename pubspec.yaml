@@ -3,8 +3,8 @@ description: Simple and robust dart FTP Connect Library to interact with FTP Ser
 version: 2.0.3
 #author: Salim Lachdhaf
 homepage: https://github.com/salim-lachdhaf
-git: https://github.com/salim-lachdhaf/ftpConnect
-repository: https://github.com/salim-lachdhaf/ftpConnect
+git: https://github.com/salim-lachdhaf/dartFTP
+repository: https://github.com/salim-lachdhaf/dartFTP
 
 environment:
   sdk: '>=2.17.0 <3.0.0'
