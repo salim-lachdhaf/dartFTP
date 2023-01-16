@@ -1,0 +1,46 @@
+name: build
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: test and send to codeCov
+   
+    steps:
+      # The branch or tag ref that triggered the workflow  will be checked out.
+      # https://github.com/actions/checkout
+      - uses: actions/checkout@v2
+      - uses: dart-lang/setup-dart@v1.3
+        #with:
+          #sdk: lastest
+      - name: Install Dependencies
+        run:  dart pub get
+
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: dart analyze
+      # run  flutter widgets tests  and unit tests
+      - run: dart pub run test --coverage=coverage && dart pub run coverage:format_coverage --lcov --in=coverage --out=coverage/lcov.info --report-on=lib
+        # Upload coverage reports to Codecov
+        # https://github.com/marketplace/actions/codecov
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: coverage/lcov.info
+
+  build_deploy:
+    #if conditional to prevent a job from running
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    name: deploy release
+    steps:
+      - uses: actions/checkout@v2
+
+      # This action will create a github release and optionally upload an artifact to it.
+      # https://github.com/ncipollo/release-action
+      - name: Create a Release
+        uses: ncipollo/release-action@v1
+        with:
+          commit: ${{ github.sha }}
+          token: ${{ secrets.GH_TOKEN }}
