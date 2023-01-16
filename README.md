@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://github.com/salim-lachdhaf/ftpConnect/actions"><img src="https://github.com/salim-lachdhaf/ftpConnect/workflows/build/badge.svg"/></a>
   <a href="https://pub.dev/packages/ftpconnect"><img src="https://img.shields.io/pub/v/ftpconnect?color=blue"></a>
-  <a href="https://codecov.io/gh/salim-lachdhaf/ftpConnect"><img src="https://codecov.io/gh/salim-lachdhaf/ftpConnect/branch/master/graph/badge.svg"/></a>
+  <a href="https://codecov.io/gh/salim-lachdhaf/dartFTP"><img src="https://codecov.io/gh/salim-lachdhaf/ftpConnect/branch/master/graph/badge.svg"/></a>
   <a href="https://www.buymeacoffee.com/SalimDev"><img src="https://img.shields.io/badge/$-donate-ff69b4.svg"></a>
 </p>
 
