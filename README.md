@@ -8,15 +8,15 @@
 </h4>
 
 <p align="center">
-  <a href="https://github.com/salim-lachdhaf/dartFTP/actions"><img src="https://github.com/salim-lachdhaf/ftpConnect/workflows/build/badge.svg"/></a>
+  <a href="https://github.com/salim-lachdhaf/dartFTP/actions"><img src="https://github.com/salim-lachdhaf/dartFTP/workflows/build/badge.svg"/></a>
   <a href="https://pub.dev/packages/ftpconnect"><img src="https://img.shields.io/pub/v/ftpconnect?color=blue"></a>
-  <a href="https://codecov.io/gh/salim-lachdhaf/dartFTP"><img src="https://codecov.io/gh/salim-lachdhaf/ftpConnect/branch/master/graph/badge.svg"/></a>
+  <a href="https://codecov.io/gh/salim-lachdhaf/dartFTP"><img src="https://codecov.io/gh/salim-lachdhaf/dartFTP/branch/master/graph/badge.svg"/></a>
   <a href="https://www.buymeacoffee.com/SalimDev"><img src="https://img.shields.io/badge/$-donate-ff69b4.svg"></a>
 </p>
 
 <p align="center">
   <a href="#key-features">Key Features</a> •
-  <a href="https://github.com/salim-lachdhaf/ftpconnect/blob/master/example">Examples</a> •
+  <a href="https://github.com/salim-lachdhaf/dartFTP/blob/master/example">Examples</a> •
   <a href="#license">License</a>
 </p>
 
