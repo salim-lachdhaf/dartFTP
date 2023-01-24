@@ -265,6 +265,36 @@ class FTPConnect {
     return Utils.retryAction(() => downloadDirRetry(), pRetryCount);
   }
 
+  /// Empty the Remote Directory [pRemoteDir] by deleting all files
+  /// [pRetryCount] number of attempts
+  Future<bool> emptyDirectory(String pRemoteDir,
+      {int pRetryCount = 1}) {
+    Future<bool> emptyDir(String? pRemoteDir) async {
+
+      //read remote directory content
+      if (!await changeDirectory(pRemoteDir)) {
+        throw FTPConnectException('Cannot download directory',
+            '$pRemoteDir not found or inaccessible !');
+      }
+      List<FTPEntry> dirContent = await listDirectoryContent();
+      await Future.forEach(dirContent, (FTPEntry entry) async {
+        if (entry.type == FTPEntryType.FILE) {
+          await deleteFile(entry.name);
+        } else if (entry.type == FTPEntryType.DIR) {
+          await emptyDirectory(entry.name);
+        }
+      });
+      return true;
+    }
+
+    Future<bool> emptyDirectoryRetry() async {
+      bool res = await emptyDir(pRemoteDir);
+      return res;
+    }
+
+    return Utils.retryAction(() => emptyDirectoryRetry(), pRetryCount);
+  }
+
   /// check the existence of the Directory with the Name of [pDirectory].
   ///
   /// Returns `true` if the directory was changed successfully

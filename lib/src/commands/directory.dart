@@ -51,7 +51,6 @@ class FTPDirectory {
 
     // Directoy content listing, the response will be handled by another socket
     _socket.sendCommandWithoutWaitingResponse(_socket.listCommand.describeEnum);
-
     // Data transfer socket
     int iPort = Utils.parsePort(response.message, _socket.supportIPV6);
     Socket dataSocket = await Socket.connect(_socket.host, iPort,
