@@ -66,7 +66,7 @@ class FTPEntry {
     String _name = "";
     DateTime? _modifyTime;
     String? _permission;
-    FTPEntryType _type = FTPEntryType.UNKNOWN;
+    FTPEntryType _type = FTPEntryType.FILE;
     int _size = 0;
     String? _unique;
     String? _group;
