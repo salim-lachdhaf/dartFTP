@@ -110,11 +110,11 @@ class FTPConnect {
   /// Returns `false` if the directory could not be deleted or does not nexist
   /// THIS USEFUL TO DELETE NON EMPTY DIRECTORY
   Future<bool> deleteDirectory(String sDirectory) async {
-    String currentDir = await this.currentDirectory();
-    if (!await this.changeDirectory(sDirectory)) {
+    String currentDir = await currentDirectory();
+    if (!await changeDirectory(sDirectory)) {
       throw FTPConnectException("Couldn't change directory to $sDirectory");
     }
-    List<FTPEntry> dirContent = await this.listDirectoryContent();
+    List<FTPEntry> dirContent = await listDirectoryContent();
     await Future.forEach(dirContent, (FTPEntry entry) async {
       if (entry.type == FTPEntryType.FILE) {
         if (!await deleteFile(entry.name)) {
@@ -126,7 +126,7 @@ class FTPConnect {
         }
       }
     });
-    await this.changeDirectory(currentDir);
+    await changeDirectory(currentDir);
     return await deleteEmptyDirectory(sDirectory);
   }
 
@@ -193,7 +193,7 @@ class FTPConnect {
     FileProgress? onProgress,
   }) {
     Future<bool> uploadFileRetry() async {
-      bool res = await this.uploadFile(
+      bool res = await uploadFile(
         fileToUpload,
         sRemoteName: pRemoteName,
         onProgress: onProgress,
@@ -217,7 +217,7 @@ class FTPConnect {
     FileProgress? onProgress,
   }) {
     Future<bool> downloadFileRetry() async {
-      bool res = await this.downloadFile(
+      bool res = await downloadFile(
         pRemoteName,
         pLocalFile,
         onProgress: onProgress,
@@ -236,11 +236,11 @@ class FTPConnect {
       await pLocalDir.create(recursive: true);
 
       //read remote directory content
-      if (!await this.changeDirectory(pRemoteDir)) {
+      if (!await changeDirectory(pRemoteDir)) {
         throw FTPConnectException('Cannot download directory',
             '$pRemoteDir not found or inaccessible !');
       }
-      List<FTPEntry> dirContent = await this.listDirectoryContent();
+      List<FTPEntry> dirContent = await listDirectoryContent();
       await Future.forEach(dirContent, (FTPEntry entry) async {
         if (entry.type == FTPEntryType.FILE) {
           File localFile = File(join(pLocalDir.path, entry.name));
@@ -251,7 +251,7 @@ class FTPConnect {
               .create(recursive: true);
           await downloadDir(entry.name, localDir);
           //back to current folder
-          await this.changeDirectory('..');
+          await changeDirectory('..');
         }
       });
       return true;
@@ -270,7 +270,7 @@ class FTPConnect {
   /// Returns `true` if the directory was changed successfully
   /// Returns `false` if the directory could not be changed (does not exist, no permissions or another error)
   Future<bool> checkFolderExistence(String pDirectory) {
-    return this.changeDirectory(pDirectory);
+    return changeDirectory(pDirectory);
   }
 
   /// Create a new Directory with the Name of [pDirectory] in the current directory if it does not exist.
@@ -279,7 +279,7 @@ class FTPConnect {
   /// Returns `false` if the directory not found and could not be created
   Future<bool> createFolderIfNotExist(String pDirectory) async {
     if (!await checkFolderExistence(pDirectory)) {
-      return this.makeDirectory(pDirectory);
+      return makeDirectory(pDirectory);
     }
     return true;
   }
@@ -297,5 +297,5 @@ enum SecurityType { FTP, FTPS, FTPES }
 
 extension CommandListTypeEnum on ListCommand {
   String get describeEnum =>
-      this.toString().substring(this.toString().indexOf('.') + 1);
+      toString().substring(toString().indexOf('.') + 1);
 }

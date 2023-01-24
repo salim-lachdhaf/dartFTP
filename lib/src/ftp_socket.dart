@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import '/src/ftp_reply.dart';
+import 'ftp_reply.dart';
 
 import '../ftpconnect.dart';
 
@@ -15,7 +15,7 @@ class FTPSocket {
   late RawSocket _socket;
   TransferMode transferMode = TransferMode.passive;
   TransferType _transferType = TransferType.auto;
-  ListCommand listCommand = ListCommand.MLSD;
+  ListCommand listCommand = ListCommand.LIST;
   bool supportIPV6 = false;
 
   FTPSocket(this.host, this.port, this.securityType, this.logger, this.timeout);
