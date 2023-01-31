@@ -27,7 +27,9 @@
 * List FTP directory contents
 * Manage FTP files (rename/delete)
 * Completely asynchronous functions
-
+<p>
+This Library is based on <a href="https://github.com/Nexific/dart_ftpclient">dart_ftpclient</a> which not updated since few years.
+</p>
 
 ## Example upload file
 ###example 1:
