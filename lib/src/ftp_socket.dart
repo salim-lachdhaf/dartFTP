@@ -97,6 +97,7 @@ class FTPSocket {
           host,
           port,
           timeout: timeout,
+          onBadCertificate: (certificate) => true,
         );
       } else {
         _socket = await RawSocket.connect(
