@@ -18,23 +18,30 @@ class FTPConnect {
   /// Create a FTP Client instance
   ///
   /// [host]: Hostname or IP Address
-  /// [port]: Port number (Defaults to 21)
+  /// [port]: Port number (Defaults to 21 for FTP and FTPES, 990 for FTPS)
   /// [user]: Username (Defaults to anonymous)
   /// [pass]: Password if not anonymous login
   /// [debug]: Enable Debug Logging
   /// [timeout]: Timeout in seconds to wait for responses
-  FTPConnect(String host,
-      {int port = 21,
-      String user = 'anonymous',
-      String pass = '',
-      bool showLog = false,
-      SecurityType securityType = SecurityType.FTP,
-      Logger? logger,
-      int timeout = 30})
-      : _user = user,
+  FTPConnect(
+    String host, {
+    int? port,
+    String user = 'anonymous',
+    String pass = '',
+    bool showLog = false,
+    SecurityType securityType = SecurityType.FTP,
+    Logger? logger,
+    int timeout = 30,
+  })  : _user = user,
         _pass = pass {
-    _socket = FTPSocket(host, port, securityType,
-        logger != null ? logger : Logger(isEnabled: showLog), timeout);
+    port ??= securityType == SecurityType.FTPS ? 990 : 21;
+    _socket = FTPSocket(
+      host,
+      port,
+      securityType,
+      logger != null ? logger : Logger(isEnabled: showLog),
+      timeout,
+    );
   }
 
   set transferMode(TransferMode pTransferMode) {

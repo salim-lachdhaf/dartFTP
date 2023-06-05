@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import '/src/ftp_reply.dart';
-
 import '../ftpconnect.dart';
 
 class FTPSocket {
@@ -89,12 +88,23 @@ class FTPSocket {
   Future<bool> connect(String user, String pass, {String? account}) async {
     logger.log('Connecting...');
 
+    final timeout = Duration(seconds: this.timeout);
+
     try {
-      _socket = await RawSocket.connect(
-        host,
-        port,
-        timeout: Duration(seconds: timeout),
-      );
+      // FTPS starts secure
+      if (securityType == SecurityType.FTPS) {
+        _socket = await RawSecureSocket.connect(
+          host,
+          port,
+          timeout: timeout,
+        );
+      } else {
+        _socket = await RawSocket.connect(
+          host,
+          port,
+          timeout: timeout,
+        );
+      }
     } catch (e) {
       throw FTPConnectException(
           'Could not connect to $host ($port)', e.toString());
@@ -103,22 +113,23 @@ class FTPSocket {
     logger.log('Connection established, waiting for welcome message...');
     await readResponse();
 
-    if (securityType == SecurityType.FTPS ||
-        securityType == SecurityType.FTPES) {
-      if (securityType == SecurityType.FTPES) {
-        FTPReply lResp = await sendCommand('AUTH TLS');
+    // FTPES needs to be upgraded prior to getting a welcome
+    if (securityType == SecurityType.FTPES) {
+      FTPReply lResp = await sendCommand('AUTH TLS');
+      if (!lResp.isSuccessCode()) {
+        lResp = await sendCommand('AUTH SSL');
         if (!lResp.isSuccessCode()) {
-          lResp = await sendCommand('AUTH SSL');
-          if (!lResp.isSuccessCode()) {
-            throw FTPConnectException(
-                'FTPES cannot be applied: the server refused both AUTH TLS and AUTH SSL commands',
-                lResp.message);
-          }
+          throw FTPConnectException(
+              'FTPES cannot be applied: the server refused both AUTH TLS and AUTH SSL commands',
+              lResp.message);
         }
       }
+
       _socket = await RawSecureSocket.secure(_socket,
           onBadCertificate: (certificate) => true);
+    }
 
+    if ([SecurityType.FTPES, SecurityType.FTPS].contains(securityType)) {
       await sendCommand('PBSZ 0');
       await sendCommand('PROT P');
     }
