@@ -14,6 +14,15 @@ void main() async {
   );
   _ftpConnect.supportIPV6 = true;
 
+  final FTPConnect _ftpsConnect = new FTPConnect(
+    "test.rebex.net",
+    user: "demo",
+    pass: "password",
+    securityType: SecurityType.FTPS,
+    showLog: true,
+  );
+  _ftpConnect.supportIPV6 = true;
+
   final FTPConnect _ftpConnectSecured = new FTPConnect(
     "ftp.dlptest.com",
     user: "dlpuser",
@@ -55,6 +64,10 @@ void main() async {
         user: "pvpt", pass: "Lachdhaf", securityType: SecurityType.FTPES);
     expect(() async => await _ftpConnectNoLog.connect(),
         throwsA(isA<FTPConnectException>()));
+  });
+
+  test('test ftps', () async {
+    expect(await _ftpsConnect.connect(), equals(true));
   });
 
   test('test ftpConnect No log', () async {
