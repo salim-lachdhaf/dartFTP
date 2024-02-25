@@ -1,3 +1,5 @@
+## [2.0.7] - 2024.02.25
+* fix bug [#7](https://github.com/salim-lachdhaf/ftpConnect/issues/18) thnx @ChaseGuru
 ## [2.0.6] - 2024.02.25
 * Update dependencies versions
 * Fix lint error
