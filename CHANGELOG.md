@@ -1,3 +1,6 @@
+## [2.0.6] - 2024.02.25
+* Update dependencies versions
+* Fix lint error
 ## [2.0.5] - 2023.01.16
 * Fix lint error
 ## [2.0.3] - 2023.01.08

@@ -2,7 +2,6 @@
 import 'dart:io';
 
 import 'package:ftpconnect/ftpconnect.dart';
-import 'package:ftpconnect/src/ftp_entry.dart';
 import 'package:ftpconnect/src/ftp_reply.dart';
 import 'package:test/test.dart';
 

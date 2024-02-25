@@ -101,12 +101,13 @@ class FTPEntry {
             _size = int.parse(prop[1]);
             break;
           case 'type':
-            if (prop[1] == 'dir')
+            if (prop[1] == 'dir') {
               _type = FTPEntryType.DIR;
-            else if (prop[1] == 'file')
+            } else if (prop[1] == 'file') {
               _type = FTPEntryType.FILE;
-            else
+            } else {
               _type = FTPEntryType.LINK;
+            }
             break;
           case 'unique':
             _unique = prop[1];
@@ -195,7 +196,7 @@ class FTPEntry {
       //insert year
       if (date.contains(':')) date = '$date ${DateTime.now().year}';
       var format = date.contains(':') ? 'MMM dd hh:mm yyyy' : 'MMM dd yyyy';
-      _modifyTime = DateFormat(format).parse(date);
+      _modifyTime = DateFormat(format, 'en_US').parse(date);
       //file/dir name
       _name = match.group(8)!;
     }

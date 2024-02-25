@@ -1,18 +1,18 @@
 name: ftpconnect
 description: Simple and robust dart FTP Connect Library to interact with FTP Servers.
-version: 2.0.5
+version: 2.0.6
 #author: Salim Lachdhaf
 homepage: https://github.com/salim-lachdhaf
 git: https://github.com/salim-lachdhaf/dartFTP
 repository: https://github.com/salim-lachdhaf/dartFTP
 
 environment:
-  sdk: '>=2.17.0 <3.0.0'
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
-  path: ^1.8.3
-  intl: ^0.18.0
+  path: ^1.9.0
+  intl: ^0.19.0
 
 dev_dependencies:
-  test: ^1.21.4
-  coverage: ^1.6.0
+  test: ^1.25.2
+  coverage: ^1.7.2

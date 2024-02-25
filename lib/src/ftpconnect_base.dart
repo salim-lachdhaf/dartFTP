@@ -1,11 +1,10 @@
 import 'dart:io';
 
+import 'package:ftpconnect/ftpconnect.dart';
 import 'package:path/path.dart';
 
-import '../ftpconnect.dart';
 import 'commands/directory.dart';
 import 'commands/file.dart';
-import 'ftp_entry.dart';
 import 'ftp_reply.dart';
 import 'ftp_socket.dart';
 import 'utils.dart';
