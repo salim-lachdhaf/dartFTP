@@ -118,17 +118,20 @@ class FTPConnect {
   Future<bool> deleteDirectory(String sDirectory) async {
     String currentDir = await this.currentDirectory();
     if (!await this.changeDirectory(sDirectory)) {
-      throw FTPConnectException("Couldn't change directory to $sDirectory");
+      throw FTPCannotChangeDirectoryException(
+          "Couldn't change directory to $sDirectory");
     }
     List<FTPEntry> dirContent = await this.listDirectoryContent();
     await Future.forEach(dirContent, (FTPEntry entry) async {
       if (entry.type == FTPEntryType.FILE) {
         if (!await deleteFile(entry.name)) {
-          throw FTPConnectException("Couldn't delete file ${entry.name}");
+          throw FTPCannotDeleteFileException(
+              "Couldn't delete file ${entry.name}");
         }
       } else {
         if (!await deleteDirectory(entry.name)) {
-          throw FTPConnectException("Couldn't delete folder ${entry.name}");
+          throw FTPCannotDeleteFolderException(
+              "Couldn't delete folder ${entry.name}");
         }
       }
     });
@@ -243,7 +246,7 @@ class FTPConnect {
 
       //read remote directory content
       if (!await this.changeDirectory(pRemoteDir)) {
-        throw FTPConnectException('Cannot download directory',
+        throw FTPCannotDownloadException('Cannot download directory',
             '$pRemoteDir not found or inaccessible !');
       }
       List<FTPEntry> dirContent = await this.listDirectoryContent();

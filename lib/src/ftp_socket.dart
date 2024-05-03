@@ -42,13 +42,15 @@ class FTPSocket {
       await Future.delayed(Duration(milliseconds: 300));
       return true;
     }).timeout(Duration(seconds: timeout), onTimeout: () {
-      throw FTPConnectException('Timeout reached for Receiving response !');
+      throw FTPConnectionTimeoutException(
+          'Timeout reached for Receiving response !');
     });
 
     String r = res.toString();
     if (r.startsWith("\n")) r = r.replaceFirst("\n", "");
 
-    if (r.length < 3) throw FTPConnectException("Illegal Reply Exception", r);
+    if (r.length < 3)
+      throw FTPIllegalReplyException("Illegal Reply Exception", r);
 
     int? code;
     List<String> lines = r.split('\n');
@@ -61,7 +63,8 @@ class FTPSocket {
     if (line != null && line.length >= 4 && line[3] == '-')
       return await readResponse();
 
-    if (code == null) throw FTPConnectException("Illegal Reply Exception", r);
+    if (code == null)
+      throw FTPIllegalReplyException("Illegal Reply Exception", r);
 
     FTPReply reply = FTPReply(code, r);
     logger.log('< ${reply.toString()}');
@@ -120,7 +123,7 @@ class FTPSocket {
       if (!lResp.isSuccessCode()) {
         lResp = await sendCommand('AUTH SSL');
         if (!lResp.isSuccessCode()) {
-          throw FTPConnectException(
+          throw FTPESConnectException(
               'FTPES cannot be applied: the server refused both AUTH TLS and AUTH SSL commands',
               lResp.message);
         }
@@ -142,23 +145,26 @@ class FTPSocket {
     if (lResp.code == 331) {
       lResp = await sendCommand('PASS $pass');
       if (lResp.code == 332) {
-        if (account == null) throw FTPConnectException('Account required');
+        if (account == null)
+          throw FTPAccountRequiredException('Account required');
         lResp = await sendCommand('ACCT $account');
         if (!lResp.isSuccessCode()) {
-          throw FTPConnectException('Wrong Account', lResp.message);
+          throw FTPWrongCredentialsException('Wrong Account', lResp.message);
         }
       } else if (!lResp.isSuccessCode()) {
-        throw FTPConnectException('Wrong Username/password', lResp.message);
+        throw FTPWrongCredentialsException(
+            'Wrong Username/password', lResp.message);
       }
       //account required
     } else if (lResp.code == 332) {
-      if (account == null) throw FTPConnectException('Account required');
+      if (account == null)
+        throw FTPAccountRequiredException('Account required');
       lResp = await sendCommand('ACCT $account');
       if (!lResp.isSuccessCode()) {
-        throw FTPConnectException('Wrong Account', lResp.message);
+        throw FTPWrongCredentialsException('Wrong Account', lResp.message);
       }
     } else if (!lResp.isSuccessCode()) {
-      throw FTPConnectException('Wrong username $user', lResp.message);
+      throw FTPWrongCredentialsException('Wrong username $user', lResp.message);
     }
 
     logger.log('Connected!');
@@ -172,7 +178,8 @@ class FTPSocket {
     } else {
       res = await sendCommand(supportIPV6 ? 'EPSV' : 'PASV');
       if (!res.isSuccessCode()) {
-        throw FTPConnectException('Could not start Passive Mode', res.message);
+        throw FTPUnablePassiveModeException(
+            'Could not start Passive Mode', res.message);
       }
     }
 

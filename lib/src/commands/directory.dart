@@ -35,7 +35,7 @@ class FTPDirectory {
   Future<String> currentDirectory() async {
     FTPReply sResponse = await _socket.sendCommand('PWD');
     if (!sResponse.isSuccessCode()) {
-      throw FTPConnectException(
+      throw FTPUnableToGetCWDException(
           'Failed to get current working directory', sResponse.message);
     }
 
@@ -61,7 +61,8 @@ class FTPDirectory {
     //some server return two lines 125 and 226 for transfer finished
     bool isTransferCompleted = response.isSuccessCode();
     if (!isTransferCompleted && response.code != 125 && response.code != 150) {
-      throw FTPConnectException('Connection refused. ', response.message);
+      throw FTPConnectionRefusedException(
+          'Connection refused. ', response.message);
     }
 
     List<int> lstDirectoryListing = [];
@@ -74,7 +75,7 @@ class FTPDirectory {
     if (!isTransferCompleted) {
       response = await _socket.readResponse();
       if (!response.isSuccessCode()) {
-        throw FTPConnectException('Transfer Error.', response.message);
+        throw FTPTransferException('Transfer Error.', response.message);
       }
     }
 
