@@ -39,7 +39,7 @@ class FTPSocket {
       }
       if (dataReceivedSuccessfully) return false;
 
-      await Future.delayed(Duration(milliseconds: 300));
+      await Future.delayed(Duration(milliseconds: 100));
       return true;
     }).timeout(Duration(seconds: timeout), onTimeout: () {
       throw FTPConnectionTimeoutException(
