@@ -11,13 +11,17 @@ class FTPSocket {
   final Logger logger;
   final int timeout;
   final SecurityType securityType;
+
+  /// This duration is used to set a delay for waiting responses from FTP server.
+  final Duration sendingResponseDelay;
   late RawSocket _socket;
   TransferMode transferMode = TransferMode.passive;
   TransferType _transferType = TransferType.auto;
   ListCommand listCommand = ListCommand.MLSD;
   bool supportIPV6 = false;
 
-  FTPSocket(this.host, this.port, this.securityType, this.logger, this.timeout);
+  FTPSocket(this.host, this.port, this.securityType, this.logger, this.timeout,
+      {this.sendingResponseDelay = const Duration(milliseconds: 300)});
 
   /// Set current transfer type of socket
   ///
@@ -39,7 +43,7 @@ class FTPSocket {
       }
       if (dataReceivedSuccessfully) return false;
 
-      await Future.delayed(Duration(milliseconds: 100));
+      await Future.delayed(sendingResponseDelay);
       return true;
     }).timeout(Duration(seconds: timeout), onTimeout: () {
       throw FTPConnectionTimeoutException(

@@ -22,16 +22,16 @@ class FTPConnect {
   /// [pass]: Password if not anonymous login
   /// [debug]: Enable Debug Logging
   /// [timeout]: Timeout in seconds to wait for responses
-  FTPConnect(
-    String host, {
-    int? port,
-    String user = 'anonymous',
-    String pass = '',
-    bool showLog = false,
-    SecurityType securityType = SecurityType.FTP,
-    Logger? logger,
-    int timeout = 30,
-  })  : _user = user,
+  FTPConnect(String host,
+      {int? port,
+      String user = 'anonymous',
+      String pass = '',
+      bool showLog = false,
+      SecurityType securityType = SecurityType.FTP,
+      Logger? logger,
+      int timeout = 30,
+      Duration sendingResponseDelay = const Duration(milliseconds: 300)})
+      : _user = user,
         _pass = pass {
     port ??= securityType == SecurityType.FTPS ? 990 : 21;
     _socket = FTPSocket(
@@ -40,6 +40,7 @@ class FTPConnect {
       securityType,
       logger != null ? logger : Logger(isEnabled: showLog),
       timeout,
+      sendingResponseDelay: sendingResponseDelay,
     );
   }
 

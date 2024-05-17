@@ -91,7 +91,7 @@ void main() async {
         user: "xxxcx", pass: "xxxx", securityType: SecurityType.FTPES);
 
     expect(() async => await _ftpConnectTimeOut.connect(),
-        throwsA(isA<FTPConnectException>()));
+        throwsA(isA<FTPConnectionTimeoutException>()));
   });
 
   test('test ftpConnect error connect', () async {
@@ -100,13 +100,13 @@ void main() async {
     try {
       await _ftpConnectErrorConnect.connect();
     } catch (e) {
-      expect(e is FTPConnectException, equals(true));
+      expect(e is FTPWrongCredentialsException, equals(true));
     }
     _ftpConnectErrorConnect = new FTPConnect("xxxx.wwww.com");
     try {
       await _ftpConnectErrorConnect.connect();
     } catch (e) {
-      expect(e is FTPConnectException, equals(true));
+      expect(e is FTPWrongCredentialsException, equals(true));
     }
   });
 
@@ -135,7 +135,10 @@ void main() async {
       _ftpConnect.listCommand = ListCommand.LIST;
       await _ftpConnect.deleteDirectory("../upload");
     } catch (e) {
-      expect(e is FTPConnectException, equals(true));
+      expect(
+          e is FTPCannotDeleteFolderException ||
+              e is FTPCannotChangeDirectoryException,
+          equals(true));
     }
 
     //change directory to root
@@ -170,7 +173,7 @@ void main() async {
         Directory(_testFileDir)..createSync(),
       );
     } catch (e) {
-      expect(e is FTPConnectException, equals(true));
+      expect(e is FTPCannotDownloadException, equals(true));
     }
 
     //close connexion
@@ -224,9 +227,9 @@ void main() async {
     try {
       await _ftpConnect.downloadFile(remoteFile, File('dist'));
     } catch (e) {
-      expect(e is FTPConnectException, equals(true));
+      expect(e is FTPFileNotExistsException, equals(true));
       expect(
-          (e as FTPConnectException).message ==
+          (e as FTPFileNotExistsException).message ==
               'Remote File $remoteFile does not exist!',
           equals(true));
     }
@@ -286,13 +289,13 @@ void main() async {
     expect(ftpEntry.name, equals(data4));
 
     expect(() => FTPEntry.parse(data4, ListCommand.LIST),
-        throwsA(isA<FTPConnectException>()));
+        throwsA(isA<FTPParsingErrorException>()));
 
     String data5 = "";
     expect(() => FTPEntry.parse(data5, ListCommand.MLSD),
-        throwsA(isA<FTPConnectException>()));
+        throwsA(isA<FTPParsingErrorException>()));
     expect(() => FTPEntry.parse(data5, ListCommand.LIST),
-        throwsA(isA<FTPConnectException>()));
+        throwsA(isA<FTPParsingErrorException>()));
   });
 
   test('test FTPConnect exception', () {
