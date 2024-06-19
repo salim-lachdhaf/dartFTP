@@ -13,6 +13,7 @@ class FTPConnect {
   final String _user;
   final String _pass;
   late FTPSocket _socket;
+  FTPFile? _downloadFtpFile;
 
   /// Create a FTP Client instance
   ///
@@ -90,8 +91,20 @@ class FTPConnect {
     File fFile, {
     FileProgress? onProgress,
   }) {
-    return FTPFile(_socket)
+    _downloadFtpFile = FTPFile(_socket);
+
+    return _downloadFtpFile!
         .download(sRemoteName, fFile, onProgress: onProgress);
+  }
+
+  /// Stop currently running download
+  Future<bool> stopDownloadFile() async {
+    if (_downloadFtpFile == null) {
+      return false;
+    }
+
+    return _downloadFtpFile!
+        .stopDownload();
   }
 
   /// Create a new Directory with the Name of [sDirectory] in the current directory.
