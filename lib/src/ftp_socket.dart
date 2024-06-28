@@ -70,6 +70,10 @@ class FTPSocket {
     if (code == null)
       throw FTPIllegalReplyException("Illegal Reply Exception", r);
 
+    if (code == 421)
+      throw FTPConnectionTimeoutException(
+          "Service not available, closing control connection.", r);
+
     FTPReply reply = FTPReply(code, r);
     logger.log('< ${reply.toString()}');
     return reply;
