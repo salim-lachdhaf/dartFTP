@@ -22,7 +22,7 @@ class FTPEntry {
       r"(\d+)\s+" // Number of items [3]
       r"(\w+)\s+" // File owner [4]
       r"(\w+)\s+" // File group [5]
-      r"(\d+)\s+" // File size in bytes [6]
+      r"(\-?\d+)\s+" // File size in bytes [6]
       r"(\w{3}\s+\d{1,2}\s+(?:\d{1,2}:\d{1,2}|\d{4}))\s+" // date[7]
       r"(.+)$" //file/dir name[8]
       );
