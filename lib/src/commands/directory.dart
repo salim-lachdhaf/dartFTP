@@ -49,13 +49,14 @@ class FTPDirectory {
     // Enter passive mode
     FTPReply response = await _socket.openDataTransferChannel();
 
-    // Directoy content listing, the response will be handled by another socket
-    _socket.sendCommandWithoutWaitingResponse(_socket.listCommand.describeEnum);
-
     // Data transfer socket
     int iPort = Utils.parsePort(response.message, _socket.supportIPV6);
     Socket dataSocket = await Socket.connect(_socket.host, iPort,
         timeout: Duration(seconds: _socket.timeout));
+
+    // Directoy content listing, the response will be handled by another socket
+    _socket.sendCommandWithoutWaitingResponse(_socket.listCommand.describeEnum);
+
     //Test if second socket connection accepted or not
     response = await _socket.readResponse();
     //some server return two lines 125 and 226 for transfer finished

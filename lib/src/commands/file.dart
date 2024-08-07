@@ -71,14 +71,15 @@ class FTPFile {
     // Enter passive mode
     FTPReply response = await _socket.openDataTransferChannel();
 
-    //the response will be the file, witch will be loaded with another socket
-    _socket.sendCommandWithoutWaitingResponse('RETR $sRemoteName');
-
     // Data Transfer Socket
     int lPort = Utils.parsePort(response.message, _socket.supportIPV6);
     _socket.logger.log('Opening DataSocket to Port $lPort');
     final Socket dataSocket = await Socket.connect(_socket.host, lPort,
         timeout: Duration(seconds: _socket.timeout));
+
+    // The response will be the file, which will be loaded with another socket
+    _socket.sendCommandWithoutWaitingResponse('RETR $sRemoteName');
+
     // Test if second socket connection accepted or not
     response = await _socket.readResponse();
     //some server return two lines 125 and 226 for transfer finished
@@ -136,13 +137,14 @@ class FTPFile {
       sFilename = basename(fFile.path);
     }
 
-    // The response is the file to upload, witch will be managed by another socket
-    _socket.sendCommandWithoutWaitingResponse('STOR $sFilename');
-
     // Data Transfer Socket
     int iPort = Utils.parsePort(response.message, _socket.supportIPV6);
     _socket.logger.log('Opening DataSocket to Port $iPort');
     final Socket dataSocket = await Socket.connect(_socket.host, iPort);
+
+    // The response is the file to upload, witch will be managed by another socket
+    _socket.sendCommandWithoutWaitingResponse('STOR $sFilename');
+
     //Test if second socket connection accepted or not
     response = await _socket.readResponse();
     //some server return two lines 125 and 226 for transfer finished
