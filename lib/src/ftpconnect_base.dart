@@ -22,16 +22,16 @@ class FTPConnect {
   /// [pass]: Password if not anonymous login
   /// [debug]: Enable Debug Logging
   /// [timeout]: Timeout in seconds to wait for responses
-  FTPConnect(
-    String host, {
-    int? port,
-    String user = 'anonymous',
-    String pass = '',
-    bool showLog = false,
-    SecurityType securityType = SecurityType.FTP,
-    Logger? logger,
-    int timeout = 30,
-  })  : _user = user,
+  FTPConnect(String host,
+      {int? port,
+      String user = 'anonymous',
+      String pass = '',
+      bool showLog = false,
+      SecurityType securityType = SecurityType.FTP,
+      Logger? logger,
+      int timeout = 30,
+      Duration sendingResponseDelay = const Duration(milliseconds: 300)})
+      : _user = user,
         _pass = pass {
     port ??= securityType == SecurityType.FTPS ? 990 : 21;
     _socket = FTPSocket(
@@ -40,6 +40,7 @@ class FTPConnect {
       securityType,
       logger != null ? logger : Logger(isEnabled: showLog),
       timeout,
+      sendingResponseDelay: sendingResponseDelay,
     );
   }
 
@@ -118,17 +119,20 @@ class FTPConnect {
   Future<bool> deleteDirectory(String sDirectory) async {
     String currentDir = await this.currentDirectory();
     if (!await this.changeDirectory(sDirectory)) {
-      throw FTPConnectException("Couldn't change directory to $sDirectory");
+      throw FTPCannotChangeDirectoryException(
+          "Couldn't change directory to $sDirectory");
     }
     List<FTPEntry> dirContent = await this.listDirectoryContent();
     await Future.forEach(dirContent, (FTPEntry entry) async {
       if (entry.type == FTPEntryType.FILE) {
         if (!await deleteFile(entry.name)) {
-          throw FTPConnectException("Couldn't delete file ${entry.name}");
+          throw FTPCannotDeleteFileException(
+              "Couldn't delete file ${entry.name}");
         }
       } else {
         if (!await deleteDirectory(entry.name)) {
-          throw FTPConnectException("Couldn't delete folder ${entry.name}");
+          throw FTPCannotDeleteFolderException(
+              "Couldn't delete folder ${entry.name}");
         }
       }
     });
@@ -243,7 +247,7 @@ class FTPConnect {
 
       //read remote directory content
       if (!await this.changeDirectory(pRemoteDir)) {
-        throw FTPConnectException('Cannot download directory',
+        throw FTPCannotDownloadException('Cannot download directory',
             '$pRemoteDir not found or inaccessible !');
       }
       List<FTPEntry> dirContent = await this.listDirectoryContent();

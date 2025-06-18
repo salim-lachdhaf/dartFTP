@@ -37,18 +37,18 @@ class FTPFile {
   }
 
   Future<int> size(String? sFilename) async {
+    FTPReply sResponse = await (_socket.sendCommand('SIZE $sFilename'));
+    if (!sResponse.isSuccessCode() &&
+        _socket.transferType != TransferType.binary) {
+      //check if ascii mode get refused
+      //change to binary mode if ascii mode refused
+      final _socketTransferTypeBackup = _socket.transferType;
+      await _socket.setTransferType(TransferType.binary);
+      sResponse = await (_socket.sendCommand('SIZE $sFilename'));
+      //back to default mode
+      await _socket.setTransferType(_socketTransferTypeBackup);
+    }
     try {
-      FTPReply sResponse = await (_socket.sendCommand('SIZE $sFilename'));
-      if (!sResponse.isSuccessCode() &&
-          _socket.transferType != TransferType.binary) {
-        //check if ascii mode get refused
-        //change to binary mode if ascii mode refused
-        final _socketTransferTypeBackup = _socket.transferType;
-        await _socket.setTransferType(TransferType.binary);
-        sResponse = await (_socket.sendCommand('SIZE $sFilename'));
-        //back to default mode
-        await _socket.setTransferType(_socketTransferTypeBackup);
-      }
       return int.parse(sResponse.message.replaceAll('213 ', ''));
     } catch (e) {
       return -1;
@@ -65,7 +65,8 @@ class FTPFile {
     int fileSize = 0;
     fileSize = await FTPFile(_socket).size(sRemoteName);
     if (fileSize == -1) {
-      throw FTPConnectException('Remote File $sRemoteName does not exist!');
+      throw FTPFileNotExistsException(
+          'Remote File $sRemoteName does not exist!');
     }
 
     // Enter passive mode
@@ -84,7 +85,8 @@ class FTPFile {
     //some server return two lines 125 and 226 for transfer finished
     bool isTransferCompleted = response.isSuccessCode();
     if (!isTransferCompleted && response.code != 125 && response.code != 150) {
-      throw FTPConnectException('Connection refused. ', response.message);
+      throw FTPConnectionRefusedException(
+          'Connection refused. ', response.message);
     }
 
     // Changed to listen mode instead so that it's possible to send information back on downloaded amount
@@ -111,7 +113,7 @@ class FTPFile {
       //Test if All data are well transferred
       response = await _socket.readResponse();
       if (!response.isSuccessCode()) {
-        throw FTPConnectException('Transfer Error.', response.message);
+        throw FTPTransferException('Transfer Error.', response.message);
       }
     }
 
@@ -148,7 +150,8 @@ class FTPFile {
     //some server return two lines 125 and 226 for transfer finished
     bool isTransferCompleted = response.isSuccessCode();
     if (!isTransferCompleted && response.code != 125 && response.code != 150) {
-      throw FTPConnectException('Connection refused. ', response.message);
+      throw FTPConnectionRefusedException(
+          'Connection refused. ', response.message);
     }
 
     _socket.logger.log('Start uploading...');
@@ -180,7 +183,7 @@ class FTPFile {
       // Test if All data are well transferred
       response = await _socket.readResponse();
       if (!response.isSuccessCode()) {
-        throw FTPConnectException('Transfer Error.', response.message);
+        throw FTPTransferException('Transfer Error.', response.message);
       }
     }
 

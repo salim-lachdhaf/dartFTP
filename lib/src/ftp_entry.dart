@@ -50,7 +50,8 @@ class FTPEntry {
 
   factory FTPEntry.parse(String responseLine, ListCommand cmd) {
     if (responseLine.trim().isEmpty) {
-      throw FTPConnectException("Can't parse a null or blank response line");
+      throw FTPParsingErrorException(
+          "Can't parse a null or blank response line");
     }
     if (cmd == ListCommand.LIST) {
       return FTPEntry._parseListCommand(responseLine);
@@ -152,7 +153,7 @@ class FTPEntry {
     } else if (regexpLISTSiiServers.hasMatch(responseLine)) {
       return FTPEntry._parseLISTiis(responseLine);
     } else {
-      throw FTPConnectException(
+      throw FTPParsingErrorException(
           'Invalid format <$responseLine> for LIST command response !');
     }
   }

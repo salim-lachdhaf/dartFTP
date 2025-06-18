@@ -11,13 +11,17 @@ class FTPSocket {
   final Logger logger;
   final int timeout;
   final SecurityType securityType;
+
+  /// This duration is used to set a delay for waiting responses from FTP server.
+  final Duration sendingResponseDelay;
   late RawSocket _socket;
   TransferMode transferMode = TransferMode.passive;
   TransferType _transferType = TransferType.auto;
   ListCommand listCommand = ListCommand.MLSD;
   bool supportIPV6 = false;
 
-  FTPSocket(this.host, this.port, this.securityType, this.logger, this.timeout);
+  FTPSocket(this.host, this.port, this.securityType, this.logger, this.timeout,
+      {this.sendingResponseDelay = const Duration(milliseconds: 300)});
 
   /// Set current transfer type of socket
   ///
@@ -39,16 +43,18 @@ class FTPSocket {
       }
       if (dataReceivedSuccessfully) return false;
 
-      await Future.delayed(Duration(milliseconds: 300));
+      await Future.delayed(sendingResponseDelay);
       return true;
     }).timeout(Duration(seconds: timeout), onTimeout: () {
-      throw FTPConnectException('Timeout reached for Receiving response !');
+      throw FTPConnectionTimeoutException(
+          'Timeout reached for Receiving response !');
     });
 
     String r = res.toString();
     if (r.startsWith("\n")) r = r.replaceFirst("\n", "");
 
-    if (r.length < 3) throw FTPConnectException("Illegal Reply Exception", r);
+    if (r.length < 3)
+      throw FTPIllegalReplyException("Illegal Reply Exception", r);
 
     int? code;
     List<String> lines = r.split('\n');
@@ -61,7 +67,12 @@ class FTPSocket {
     if (line != null && line.length >= 4 && line[3] == '-')
       return await readResponse();
 
-    if (code == null) throw FTPConnectException("Illegal Reply Exception", r);
+    if (code == null)
+      throw FTPIllegalReplyException("Illegal Reply Exception", r);
+
+    if (code == 421)
+      throw FTPConnectionTimeoutException(
+          "Service not available, closing control connection.", r);
 
     FTPReply reply = FTPReply(code, r);
     logger.log('< ${reply.toString()}');
@@ -120,7 +131,7 @@ class FTPSocket {
       if (!lResp.isSuccessCode()) {
         lResp = await sendCommand('AUTH SSL');
         if (!lResp.isSuccessCode()) {
-          throw FTPConnectException(
+          throw FTPESConnectException(
               'FTPES cannot be applied: the server refused both AUTH TLS and AUTH SSL commands',
               lResp.message);
         }
@@ -142,23 +153,26 @@ class FTPSocket {
     if (lResp.code == 331) {
       lResp = await sendCommand('PASS $pass');
       if (lResp.code == 332) {
-        if (account == null) throw FTPConnectException('Account required');
+        if (account == null)
+          throw FTPAccountRequiredException('Account required');
         lResp = await sendCommand('ACCT $account');
         if (!lResp.isSuccessCode()) {
-          throw FTPConnectException('Wrong Account', lResp.message);
+          throw FTPWrongCredentialsException('Wrong Account', lResp.message);
         }
       } else if (!lResp.isSuccessCode()) {
-        throw FTPConnectException('Wrong Username/password', lResp.message);
+        throw FTPWrongCredentialsException(
+            'Wrong Username/password', lResp.message);
       }
       //account required
     } else if (lResp.code == 332) {
-      if (account == null) throw FTPConnectException('Account required');
+      if (account == null)
+        throw FTPAccountRequiredException('Account required');
       lResp = await sendCommand('ACCT $account');
       if (!lResp.isSuccessCode()) {
-        throw FTPConnectException('Wrong Account', lResp.message);
+        throw FTPWrongCredentialsException('Wrong Account', lResp.message);
       }
     } else if (!lResp.isSuccessCode()) {
-      throw FTPConnectException('Wrong username $user', lResp.message);
+      throw FTPWrongCredentialsException('Wrong username $user', lResp.message);
     }
 
     logger.log('Connected!');
@@ -172,7 +186,8 @@ class FTPSocket {
     } else {
       res = await sendCommand(supportIPV6 ? 'EPSV' : 'PASV');
       if (!res.isSuccessCode()) {
-        throw FTPConnectException('Could not start Passive Mode', res.message);
+        throw FTPUnablePassiveModeException(
+            'Could not start Passive Mode', res.message);
       }
     }
 
