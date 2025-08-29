@@ -14,7 +14,7 @@ class FTPSocket {
   late RawSocket _socket;
   TransferMode transferMode = TransferMode.passive;
   TransferType _transferType = TransferType.auto;
-  ListCommand listCommand = ListCommand.MLSD;
+  ListCommand listCommand = ListCommand.mlsd;
   bool supportIPV6 = false;
 
   FTPSocket(this.host, this.port, this.securityType, this.logger, this.timeout);
@@ -58,8 +58,9 @@ class FTPSocket {
       if (line.length >= 3) code = int.tryParse(line.substring(0, 3)) ?? code;
     }
     //multiline response
-    if (line != null && line.length >= 4 && line[3] == '-')
+    if (line != null && line.length >= 4 && line[3] == '-') {
       return await readResponse();
+    }
 
     if (code == null) throw FTPConnectException("Illegal Reply Exception", r);
 
@@ -92,7 +93,7 @@ class FTPSocket {
 
     try {
       // FTPS starts secure
-      if (securityType == SecurityType.FTPS) {
+      if (securityType == SecurityType.ftps) {
         _socket = await RawSecureSocket.connect(
           host,
           port,
@@ -115,7 +116,7 @@ class FTPSocket {
     await readResponse();
 
     // FTPES needs to be upgraded prior to getting a welcome
-    if (securityType == SecurityType.FTPES) {
+    if (securityType == SecurityType.ftpes) {
       FTPReply lResp = await sendCommand('AUTH TLS');
       if (!lResp.isSuccessCode()) {
         lResp = await sendCommand('AUTH SSL');
@@ -130,7 +131,7 @@ class FTPSocket {
           onBadCertificate: (certificate) => true);
     }
 
-    if ([SecurityType.FTPES, SecurityType.FTPS].contains(securityType)) {
+    if ([SecurityType.ftpes, SecurityType.ftps].contains(securityType)) {
       await sendCommand('PBSZ 0');
       await sendCommand('PROT P');
     }

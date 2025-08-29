@@ -36,7 +36,8 @@ class Utils {
 
   ///retry a function [retryCount] times, until exceed [retryCount] or execute the function successfully
   ///Return true if the future executed successfully , false other wises
-  static Future<bool> retryAction(FutureOr<bool> action(), retryCount) async {
+  static Future<bool> retryAction(
+      FutureOr<bool> Function() action, retryCount) async {
     int lAttempts = 1;
     bool result = true;
     await Future.doWhile(() async {
@@ -46,7 +47,7 @@ class Utils {
         return false;
       } catch (e) {
         if (lAttempts++ >= retryCount) {
-          throw e;
+          rethrow;
         }
       }
       //return true to loop again

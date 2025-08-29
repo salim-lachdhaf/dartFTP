@@ -43,11 +43,11 @@ class FTPFile {
           _socket.transferType != TransferType.binary) {
         //check if ascii mode get refused
         //change to binary mode if ascii mode refused
-        final _socketTransferTypeBackup = _socket.transferType;
+        final socketTransferTypeBackup = _socket.transferType;
         await _socket.setTransferType(TransferType.binary);
         sResponse = await (_socket.sendCommand('SIZE $sFilename'));
         //back to default mode
-        await _socket.setTransferType(_socketTransferTypeBackup);
+        await _socket.setTransferType(socketTransferTypeBackup);
       }
       return int.parse(sResponse.message.replaceAll('213 ', ''));
     } catch (e) {

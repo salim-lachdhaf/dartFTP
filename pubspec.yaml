@@ -16,3 +16,4 @@ dependencies:
 dev_dependencies:
   test: ^1.26.3
   coverage: ^1.15.0
+  pana: ^0.22.22
