@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -80,7 +81,7 @@ class FTPDirectory {
 
     // Convert MLSD response into FTPEntry
     List<FTPEntry> lstFTPEntries = <FTPEntry>[];
-    String.fromCharCodes(lstDirectoryListing).split('\n').forEach((line) {
+    Utf8Codec().decode(lstDirectoryListing).split('\n').forEach((line) {
       if (line.trim().isNotEmpty) {
         lstFTPEntries.add(
           FTPEntry.parse(line.replaceAll('\r', ""), _socket.listCommand),

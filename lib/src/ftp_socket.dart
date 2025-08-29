@@ -34,7 +34,7 @@ class FTPSocket {
 
       //this is used to read all data for specific command line
       while (_socket.available() > 0) {
-        res.write(String.fromCharCodes(_socket.read()!).trim());
+        res.write(Utf8Codec().decode(_socket.read()!).trim());
         dataReceivedSuccessfully = true;
       }
       if (dataReceivedSuccessfully) return false;

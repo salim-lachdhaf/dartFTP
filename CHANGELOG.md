@@ -1,3 +1,5 @@
+## [2.0.9] - 2024.08.29
+* fix bug [#43](https://github.com/salim-lachdhaf/dartFTP/issues/43)
 ## [2.0.7] - 2024.02.25
 * fix bug [#18](https://github.com/salim-lachdhaf/dartFTP/issues/18) thnx @ChaseGuru
 ## [2.0.6] - 2024.02.25
