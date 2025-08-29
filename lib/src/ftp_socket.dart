@@ -196,8 +196,6 @@ class FTPSocket {
         // Set to BINARY mode
         await sendCommand('TYPE I');
         break;
-      default:
-        break;
     }
     _transferType = pTransferType;
   }
