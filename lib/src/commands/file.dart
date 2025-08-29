@@ -13,6 +13,8 @@ typedef FileProgress = void Function(
 
 class FTPFile {
   final FTPSocket _socket;
+  Socket? _downloadDataSocket;
+  StreamSubscription? _downloadDataSocketSubscription;
 
   FTPFile(this._socket);
 
@@ -77,7 +79,7 @@ class FTPFile {
     // Data Transfer Socket
     int lPort = Utils.parsePort(response.message, _socket.supportIPV6);
     _socket.logger.log('Opening DataSocket to Port $lPort');
-    final Socket dataSocket = await Socket.connect(_socket.host, lPort,
+    _downloadDataSocket = await Socket.connect(_socket.host, lPort,
         timeout: Duration(seconds: _socket.timeout));
     // Test if second socket connection accepted or not
     response = await _socket.readResponse();
@@ -91,7 +93,7 @@ class FTPFile {
     _socket.logger.log('Start downloading...');
     var sink = fLocalFile.openWrite(mode: FileMode.writeOnly);
     var received = 0;
-    await dataSocket.listen((data) {
+    _downloadDataSocketSubscription = _downloadDataSocket!.listen((data) {
       sink.add(data);
       if (onProgress != null) {
         received += data.length;
@@ -101,9 +103,10 @@ class FTPFile {
         if (percentVal.isInfinite || percentVal.isNaN) percentVal = 100;
         onProgress(percentVal, received, fileSize);
       }
-    }).asFuture();
+    });
+    await _downloadDataSocketSubscription!.asFuture();
 
-    await dataSocket.close();
+    await _downloadDataSocket!.close();
     await sink.flush();
     await sink.close();
 
@@ -116,6 +119,20 @@ class FTPFile {
     }
 
     _socket.logger.log('File Downloaded!');
+    return true;
+  }
+
+  Future<bool> stopDownload() async {
+    if (_downloadDataSocket == null || _downloadDataSocketSubscription == null) {
+      return false;
+    }
+
+    _downloadDataSocketSubscription!.cancel();
+    _downloadDataSocketSubscription = null;
+
+    _downloadDataSocket!.close();
+    _downloadDataSocket = null;
+
     return true;
   }
 
