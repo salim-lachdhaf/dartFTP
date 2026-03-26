@@ -55,8 +55,15 @@ class FTPDirectory {
 
     // Data transfer socket
     int iPort = Utils.parsePort(response.message, _socket.supportIPV6);
-    Socket dataSocket = await Socket.connect(_socket.host, iPort,
-        timeout: Duration(seconds: _socket.timeout));
+    Socket dataSocket = _socket.securityType == SecurityType.ftp
+        ? await Socket.connect(_socket.host, iPort,
+            timeout: Duration(seconds: _socket.timeout))
+        : await SecureSocket.connect(
+            _socket.host,
+            iPort,
+            timeout: Duration(seconds: _socket.timeout),
+            onBadCertificate: (certificate) => true,
+          );
     //Test if second socket connection accepted or not
     response = await _socket.readResponse();
     //some server return two lines 125 and 226 for transfer finished
@@ -70,7 +77,7 @@ class FTPDirectory {
       lstDirectoryListing.addAll(data);
     }).asFuture();
 
-    await dataSocket.close();
+    dataSocket.destroy();
 
     if (!isTransferCompleted) {
       response = await _socket.readResponse();

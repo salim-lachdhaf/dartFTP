@@ -77,8 +77,15 @@ class FTPFile {
     // Data Transfer Socket
     int lPort = Utils.parsePort(response.message, _socket.supportIPV6);
     _socket.logger.log('Opening DataSocket to Port $lPort');
-    final Socket dataSocket = await Socket.connect(_socket.host, lPort,
-        timeout: Duration(seconds: _socket.timeout));
+    final Socket dataSocket = _socket.securityType == SecurityType.ftp
+        ? await Socket.connect(_socket.host, lPort,
+            timeout: Duration(seconds: _socket.timeout))
+        : await SecureSocket.connect(
+            _socket.host,
+            lPort,
+            timeout: Duration(seconds: _socket.timeout),
+            onBadCertificate: (certificate) => true,
+          );
     // Test if second socket connection accepted or not
     response = await _socket.readResponse();
     //some server return two lines 125 and 226 for transfer finished
@@ -103,7 +110,7 @@ class FTPFile {
       }
     }).asFuture();
 
-    await dataSocket.close();
+    dataSocket.destroy();
     await sink.flush();
     await sink.close();
 
@@ -142,7 +149,15 @@ class FTPFile {
     // Data Transfer Socket
     int iPort = Utils.parsePort(response.message, _socket.supportIPV6);
     _socket.logger.log('Opening DataSocket to Port $iPort');
-    final Socket dataSocket = await Socket.connect(_socket.host, iPort);
+    final Socket dataSocket = _socket.securityType == SecurityType.ftp
+        ? await Socket.connect(_socket.host, iPort,
+            timeout: Duration(seconds: _socket.timeout))
+        : await SecureSocket.connect(
+            _socket.host,
+            iPort,
+            timeout: Duration(seconds: _socket.timeout),
+            onBadCertificate: (certificate) => true,
+          );
     //Test if second socket connection accepted or not
     response = await _socket.readResponse();
     //some server return two lines 125 and 226 for transfer finished
@@ -174,7 +189,7 @@ class FTPFile {
 
     await dataSocket.addStream(readStream);
     await dataSocket.flush();
-    await dataSocket.close();
+    dataSocket.destroy();
 
     if (!isTransferCompleted) {
       // Test if All data are well transferred
