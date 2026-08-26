@@ -4,11 +4,11 @@ class FTPReply {
   final int _code;
   final String _messages;
 
-  FTPReply(this._code, this._messages);
+  const FTPReply(this._code, this._messages);
 
-  get code => _code;
+  int get code => _code;
 
-  get message => _messages;
+  String get message => _messages;
 
   bool isSuccessCode() {
     int aux = _code - 200;

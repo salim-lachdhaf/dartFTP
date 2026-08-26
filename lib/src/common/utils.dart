@@ -1,7 +1,18 @@
-import 'dart:async';
-
 class Utils {
   Utils._();
+
+  /// Computes the transferred percentage (0 -> 100, rounded to 2 decimals).
+  ///
+  /// Returns 100 when [total] is unknown/zero or the computation is not finite,
+  /// and never returns more than 100.
+  static double percent(int transferred, int total) {
+    if (total <= 0) return 100;
+    final double value =
+        double.tryParse(((transferred / total) * 100).toStringAsFixed(2)) ??
+            100;
+    if (value.isNaN || value.isInfinite) return 100;
+    return value > 100 ? 100 : value;
+  }
 
   static int parsePort(String response, bool isIPV6) {
     return isIPV6 ? parsePortEPSV(response) : parsePortPASV(response);
@@ -32,27 +43,5 @@ class Utils {
     int iPort2 = int.parse(lstParameters[lstParameters.length - 1]);
 
     return (iPort1 * 256) + iPort2;
-  }
-
-  ///retry a function [retryCount] times, until exceed [retryCount] or execute the function successfully
-  ///Return true if the future executed successfully , false other wises
-  static Future<bool> retryAction(
-      FutureOr<bool> Function() action, retryCount) async {
-    int lAttempts = 1;
-    bool result = true;
-    await Future.doWhile(() async {
-      try {
-        result = await action();
-        //if there is no exception we exit the loop (return false to exit)
-        return false;
-      } catch (e) {
-        if (lAttempts++ >= retryCount) {
-          rethrow;
-        }
-      }
-      //return true to loop again
-      return true;
-    });
-    return result;
   }
 }

@@ -40,40 +40,6 @@ void main() async {
     }
   }
 
-  Future<void> uploadWithRetry() async {
-    try {
-      File fileToUpload = await fileMock(
-          fileName: 'uploadwithRetry.txt', content: 'uploaded with Retry');
-      await log('Uploading ...');
-      await ftpConnect.connect();
-      await ftpConnect.changeDirectory('upload');
-      bool res =
-          await ftpConnect.uploadFileWithRetry(fileToUpload, pRetryCount: 2);
-      await log('file uploaded: ${res ? 'SUCCESSFULLY' : 'FAILED'}');
-      await ftpConnect.disconnect();
-    } catch (e) {
-      await log('Downloading FAILED: ${e.toString()}');
-    }
-  }
-
-  Future<void> downloadWithRetry() async {
-    try {
-      await log('Downloading ...');
-
-      String fileName = '../512KB.zip';
-      await ftpConnect.connect();
-      //here we just prepare a file as a path for the downloaded file
-      File downloadedFile = await fileMock(fileName: 'downloadwithRetry.txt');
-      bool res = await ftpConnect
-          .downloadFileWithRetry(fileName, downloadedFile, pRetryCount: 2);
-      await log(
-          'file downloaded  ${res ? 'path: ${downloadedFile.path}' : 'FAILED'}');
-      await ftpConnect.disconnect();
-    } catch (e) {
-      await log('Downloading FAILED: ${e.toString()}');
-    }
-  }
-
   Future<void> downloadStepByStep() async {
     try {
       await log('Connecting to FTP ...');
@@ -94,7 +60,5 @@ void main() async {
   }
 
   await uploadStepByStep();
-  await uploadWithRetry();
-  await downloadWithRetry();
   await downloadStepByStep();
 }

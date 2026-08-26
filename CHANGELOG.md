@@ -1,3 +1,27 @@
+## [2.3.0] - 2026.08.27
+* Add `uploadDirectory` to recursively upload a local folder to the server (FTP & SFTP)
+* Add in-memory transfers: `uploadData(Uint8List, ...)` and `downloadToBytes(...)` (FTP & SFTP)
+* Add `deleteNonEmptyDirectory` to recursively delete a folder without throwing when it is missing
+* **BREAKING**: remove `listDirectoryContentOnlyNames`; use `listDirectoryContent` and map to `name` instead
+
+## [2.2.0] - 2026.08.27
+* Fix FTPS/FTPES data transfers failing with `425` by negotiating the data connection over TLS ([#56](https://github.com/salim-lachdhaf/dartFTP/issues/56), [#50](https://github.com/salim-lachdhaf/dartFTP/issues/50), [#41](https://github.com/salim-lachdhaf/dartFTP/issues/41), [#27](https://github.com/salim-lachdhaf/dartFTP/issues/27), PR [#63](https://github.com/salim-lachdhaf/dartFTP/pull/63))
+* Fix `425 Unable to build data connection` by opening the data socket before sending `RETR`/`STOR`/list commands ([#50](https://github.com/salim-lachdhaf/dartFTP/issues/50), PR [#49](https://github.com/salim-lachdhaf/dartFTP/pull/49))
+* Fix `RangeError`/`Invalid format` when parsing LIST entries with negative file sizes ([#45](https://github.com/salim-lachdhaf/dartFTP/issues/45), PR [#49](https://github.com/salim-lachdhaf/dartFTP/pull/49))
+* Fix `TYPE I`/`TYPE A` not being re-sent after a disconnect/reconnect ([#62](https://github.com/salim-lachdhaf/dartFTP/issues/62))
+* Fix transfers hanging on `Start downloading...`/close by destroying data sockets instead of waiting for a graceful TLS shutdown ([#40](https://github.com/salim-lachdhaf/dartFTP/issues/40))
+* Fix a crash when reporting progress for zero-byte transfers
+* Mask username/password in enabled logs ([#55](https://github.com/salim-lachdhaf/dartFTP/issues/55))
+* Fix directory listing for a specific sub-directory (missing space between command and path)
+* Fix FTP downloads failing when the local parent folder does not exist
+* Always release data sockets and file handles on transfer errors
+* **BREAKING**: remove `uploadFileWithRetry`/`downloadFileWithRetry`; `downloadDirectory` no longer takes `pRetryCount`
+* Centralize connection settings in the `FileTransferClient` base class; `FTPConnect` and `SFTPConnect` now extend it
+* Internal cleanups and performance improvements
+
+## [2.1.0] - 2026.08.26
+* Add SFTP support via the new `SFTPConnect`
+* Introduce the `FileTransferClient` interface implemented by both `FTPConnect` and `SFTPConnect`
 ## [2.0.10] - 2025.08.29
 * fix lints
 ## [2.0.9] - 2025.08.29

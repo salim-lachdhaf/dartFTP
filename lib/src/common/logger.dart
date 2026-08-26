@@ -1,7 +1,7 @@
 class Logger {
   final bool isEnabled;
 
-  Logger({this.isEnabled = false});
+  const Logger({this.isEnabled = false});
 
   void log(String pMessage) {
     if (isEnabled) _printLog(pMessage);

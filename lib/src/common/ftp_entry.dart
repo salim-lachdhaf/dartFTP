@@ -1,7 +1,8 @@
+import 'package:dartssh2/dartssh2.dart';
 import 'package:intl/intl.dart';
 
 import 'ftp_exceptions.dart';
-import 'ftpconnect_base.dart';
+import 'ftp_enums.dart';
 
 class FTPEntry {
   final String name;
@@ -22,7 +23,7 @@ class FTPEntry {
       r"(\d+)\s+" // Number of items [3]
       r"(\w+)\s+" // File owner [4]
       r"(\w+)\s+" // File group [5]
-      r"(\d+)\s+" // File size in bytes [6]
+      r"(\-?\d+)\s+" // File size in bytes [6]
       r"(\w{3}\s+\d{1,2}\s+(?:\d{1,2}:\d{1,2}|\d{4}))\s+" // date[7]
       r"(.+)$" //file/dir name[8]
       );
@@ -47,6 +48,41 @@ class FTPEntry {
       this.owner,
       this.uid,
       this.additionalProperties);
+
+  /// Builds an [FTPEntry] from a single SFTP listing entry ([SftpName])
+  /// returned by the `dartssh2` package (`SftpClient.listdir`).
+  factory FTPEntry.sftp(SftpName file) {
+    final SftpFileAttrs attr = file.attr;
+
+    FTPEntryType type;
+    if (attr.isDirectory) {
+      type = FTPEntryType.dir;
+    } else if (attr.isSymbolicLink) {
+      type = FTPEntryType.link;
+    } else {
+      type = FTPEntryType.file;
+    }
+
+    final DateTime? modifyTime = attr.modifyTime != null
+        ? DateTime.fromMillisecondsSinceEpoch(attr.modifyTime! * 1000)
+        : null;
+    final String? mode = attr.mode?.toString();
+
+    return FTPEntry._(
+      file.filename,
+      modifyTime,
+      mode,
+      type,
+      attr.size,
+      null,
+      null,
+      attr.groupID,
+      mode,
+      null,
+      attr.userID,
+      {},
+    );
+  }
 
   factory FTPEntry.parse(String responseLine, ListCommand cmd) {
     if (responseLine.trim().isEmpty) {
@@ -260,5 +296,5 @@ class FTPEntry {
 enum FTPEntryType { file, dir, link, unknown }
 
 extension FtpEntryTypeEnum on FTPEntryType {
-  String get describeEnum => toString().substring(toString().indexOf('.') + 1);
+  String get describeEnum => name;
 }

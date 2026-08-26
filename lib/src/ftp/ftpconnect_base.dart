@@ -1,18 +1,23 @@
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:ftpconnect/ftpconnect.dart';
 import 'package:path/path.dart';
 
+import '../common/file_transfer_client.dart';
+import '../common/ftp_entry.dart';
+import '../common/ftp_enums.dart';
+import '../common/ftp_exceptions.dart';
 import 'commands/directory.dart';
 import 'commands/file.dart';
 import 'ftp_reply.dart';
 import 'ftp_socket.dart';
-import 'utils.dart';
 
-class FTPConnect {
-  final String _user;
-  final String _pass;
+class FTPConnect extends FileTransferClient {
   late FTPSocket _socket;
+  final bool supportIPV6;
+  final ListCommand listCommand;
+  final TransferMode transferMode;
+  final TransferType transferType;
 
   /// Create a FTP Client instance
   ///
@@ -23,35 +28,33 @@ class FTPConnect {
   /// [debug]: Enable Debug Logging
   /// [timeout]: Timeout in seconds to wait for responses
   FTPConnect(
-    String host, {
+    super.host, {
     int? port,
-    String user = 'anonymous',
-    String pass = '',
-    bool showLog = false,
+    super.user,
+    super.pass,
+    super.showLog,
     SecurityType securityType = SecurityType.ftp,
-    Logger? logger,
-    int timeout = 30,
-  })  : _user = user,
-        _pass = pass {
-    port ??= securityType == SecurityType.ftps ? 990 : 21;
+    super.logger,
+    super.timeout,
+    this.supportIPV6 = false,
+    this.listCommand = ListCommand.mlsd,
+    this.transferMode = TransferMode.passive,
+    this.transferType = TransferType.auto,
+  }) : super(
+          port: port ?? (securityType == SecurityType.ftps ? 990 : 21),
+        ) {
     _socket = FTPSocket(
       host,
-      port,
+      this.port,
       securityType,
-      logger ?? Logger(isEnabled: showLog),
+      logger,
       timeout,
+      supportIPV6: supportIPV6,
+      listCommand: listCommand,
+      transferMode: transferMode,
+      transferType: transferType,
     );
   }
-
-  set transferMode(TransferMode pTransferMode) {
-    _socket.transferMode = pTransferMode;
-  }
-
-  set listCommand(ListCommand pListCommand) {
-    _socket.listCommand = pListCommand;
-  }
-
-  set supportIPV6(bool pSupportIPV6) => _socket.supportIPV6 = pSupportIPV6;
 
   /// Set current transfer type of connection
   ///
@@ -63,18 +66,21 @@ class FTPConnect {
 
   /// Connect to the FTP Server
   /// return true if we are connected successfully
-  Future<bool> connect() => _socket.connect(_user, _pass);
+  @override
+  Future<bool> connect() => _socket.connect(user, pass);
 
   /// Disconnect from the FTP Server
   /// return true if we are disconnected successfully
+  @override
   Future<bool> disconnect() => _socket.disconnect();
 
   Future<FTPReply> sendCustomCommand(String pCmd) => _socket.sendCommand(pCmd);
 
   /// Upload the File [fFile] to the current directory
+  @override
   Future<bool> uploadFile(
     File fFile, {
-    String sRemoteName = '',
+    String? sRemoteName,
     FileProgress? onProgress,
   }) {
     return FTPFile(_socket).upload(
@@ -85,8 +91,9 @@ class FTPConnect {
   }
 
   /// Download the Remote File [sRemoteName] to the local File [fFile]
+  @override
   Future<bool> downloadFile(
-    String? sRemoteName,
+    String sRemoteName,
     File fFile, {
     FileProgress? onProgress,
   }) {
@@ -94,10 +101,34 @@ class FTPConnect {
         .download(sRemoteName, fFile, onProgress: onProgress);
   }
 
+  /// Upload the in-memory bytes [data] to the current directory as [sRemoteName]
+  @override
+  Future<bool> uploadData(
+    Uint8List data,
+    String sRemoteName, {
+    FileProgress? onProgress,
+  }) {
+    return FTPFile(_socket).uploadData(
+      data,
+      sRemoteName,
+      onProgress: onProgress,
+    );
+  }
+
+  /// Download the Remote File [sRemoteName] and return its content in memory
+  @override
+  Future<Uint8List> downloadToBytes(
+    String sRemoteName, {
+    FileProgress? onProgress,
+  }) {
+    return FTPFile(_socket).downloadToBytes(sRemoteName, onProgress: onProgress);
+  }
+
   /// Create a new Directory with the Name of [sDirectory] in the current directory.
   ///
   /// Returns `true` if the directory was created successfully
   /// Returns `false` if the directory could not be created or already exists
+  @override
   Future<bool> makeDirectory(String sDirectory) {
     return FTPDirectory(_socket).makeDirectory(sDirectory);
   }
@@ -106,7 +137,8 @@ class FTPConnect {
   ///
   /// Returns `true` if the directory was deleted successfully
   /// Returns `false` if the directory could not be deleted or does not nexist
-  Future<bool> deleteEmptyDirectory(String? sDirectory) {
+  @override
+  Future<bool> deleteEmptyDirectory(String sDirectory) {
     return FTPDirectory(_socket).deleteEmptyDirectory(sDirectory);
   }
 
@@ -115,6 +147,7 @@ class FTPConnect {
   /// Returns `true` if the directory was deleted successfully
   /// Returns `false` if the directory could not be deleted or does not nexist
   /// THIS USEFUL TO DELETE NON EMPTY DIRECTORY
+  @override
   Future<bool> deleteDirectory(String sDirectory) async {
     String currentDir = await currentDirectory();
     if (!await changeDirectory(sDirectory)) {
@@ -136,16 +169,33 @@ class FTPConnect {
     return await deleteEmptyDirectory(sDirectory);
   }
 
+  /// Deletes the Directory [sDirectory] even when it is not empty.
+  ///
+  /// Removes all of its content recursively then the directory itself.
+  /// Returns `false` (instead of throwing) when the directory does not exist
+  /// or cannot be removed.
+  @override
+  Future<bool> deleteNonEmptyDirectory(String sDirectory) async {
+    try {
+      return await deleteDirectory(sDirectory);
+    } catch (e) {
+      _socket.logger.log('Cannot delete directory $sDirectory: $e');
+      return false;
+    }
+  }
+
   /// Change into the Directory with the Name of [sDirectory] within the current directory.
   ///
   /// Use `..` to navigate back
   /// Returns `true` if the directory was changed successfully
   /// Returns `false` if the directory could not be changed (does not exist, no permissions or another error)
-  Future<bool> changeDirectory(String? sDirectory) {
+  @override
+  Future<bool> changeDirectory(String sDirectory) {
     return FTPDirectory(_socket).changeDirectory(sDirectory);
   }
 
   /// Returns the current directory
+  @override
   Future<String> currentDirectory() {
     return FTPDirectory(_socket).currentDirectory();
   }
@@ -153,92 +203,40 @@ class FTPConnect {
   /// Returns the content of the current directory
   /// [cmd] refer to the used command for the server, there is servers working
   /// with MLSD and other with LIST
-  Future<List<FTPEntry>> listDirectoryContent() {
-    return FTPDirectory(_socket).directoryContent();
-  }
-
-  /// Returns the content names of the current directory
-  /// [cmd] refer to the used command for the server, there is servers working
-  /// with MLSD and other with LIST for detailed content
-  Future<List<String>> listDirectoryContentOnlyNames() {
-    return FTPDirectory(_socket).directoryContentNames();
+  @override
+  Future<List<FTPEntry>> listDirectoryContent([String? sDirectory]) {
+    return FTPDirectory(_socket).directoryContent(sDirectory);
   }
 
   /// Rename a file (or directory) from [sOldName] to [sNewName]
+  @override
   Future<bool> rename(String sOldName, String sNewName) {
     return FTPFile(_socket).rename(sOldName, sNewName);
   }
 
   /// Delete the file [sFilename] from the server
-  Future<bool> deleteFile(String? sFilename) {
+  @override
+  Future<bool> deleteFile(String sFilename) {
     return FTPFile(_socket).delete(sFilename);
   }
 
   /// check the existence of  the file [sFilename] from the server
+  @override
   Future<bool> existFile(String sFilename) {
     return FTPFile(_socket).exist(sFilename);
   }
 
   /// returns the file [sFilename] size from server,
   /// returns -1 if file does not exist
+  @override
   Future<int> sizeFile(String sFilename) {
     return FTPFile(_socket).size(sFilename);
   }
 
-  /// Upload the File [fileToUpload] to the current directory
-  /// if [pRemoteName] is not setted the remote file will take take the same local name
-  /// [pRetryCount] number of attempts
-  ///
-  /// this strategy can be used when we don't need to go step by step
-  /// (connect -> upload -> disconnect) or there is a need for a number of attemps
-  /// in case of a poor connexion for example
-  Future<bool> uploadFileWithRetry(
-    File fileToUpload, {
-    String pRemoteName = '',
-    int pRetryCount = 1,
-    FileProgress? onProgress,
-  }) {
-    Future<bool> uploadFileRetry() async {
-      bool res = await uploadFile(
-        fileToUpload,
-        sRemoteName: pRemoteName,
-        onProgress: onProgress,
-      );
-      return res;
-    }
-
-    return Utils.retryAction(() => uploadFileRetry(), pRetryCount);
-  }
-
-  /// Download the Remote File [pRemoteName] to the local File [pLocalFile]
-  /// [pRetryCount] number of attempts
-  ///
-  /// this strategy can be used when we don't need to go step by step
-  /// (connect -> download -> disconnect) or there is a need for a number of attempts
-  /// in case of a poor connexion for example
-  Future<bool> downloadFileWithRetry(
-    String pRemoteName,
-    File pLocalFile, {
-    int pRetryCount = 1,
-    FileProgress? onProgress,
-  }) {
-    Future<bool> downloadFileRetry() async {
-      bool res = await downloadFile(
-        pRemoteName,
-        pLocalFile,
-        onProgress: onProgress,
-      );
-      return res;
-    }
-
-    return Utils.retryAction(() => downloadFileRetry(), pRetryCount);
-  }
-
   /// Download the Remote Directory [pRemoteDir] to the local File [pLocalDir]
-  /// [pRetryCount] number of attempts
-  Future<bool> downloadDirectory(String pRemoteDir, Directory pLocalDir,
-      {int pRetryCount = 1}) {
-    Future<bool> downloadDir(String? pRemoteDir, Directory pLocalDir) async {
+  @override
+  Future<bool> downloadDirectory(String pRemoteDir, Directory pLocalDir) {
+    Future<bool> downloadDir(String pRemoteDir, Directory pLocalDir) async {
       await pLocalDir.create(recursive: true);
 
       //read remote directory content
@@ -263,18 +261,50 @@ class FTPConnect {
       return true;
     }
 
-    Future<bool> downloadDirRetry() async {
-      bool res = await downloadDir(pRemoteDir, pLocalDir);
-      return res;
+    return downloadDir(pRemoteDir, pLocalDir);
+  }
+
+  /// Upload the local Directory [pLocalDir] recursively into the remote
+  /// directory [pRemoteDir] (created if it does not exist).
+  @override
+  Future<bool> uploadDirectory(
+    Directory pLocalDir,
+    String pRemoteDir, {
+    FileProgress? onProgress,
+  }) async {
+    Future<bool> uploadDir(Directory localDir, String remoteDir) async {
+      final String currentDir = await currentDirectory();
+      if (!await createFolderIfNotExist(remoteDir)) {
+        throw FTPConnectException(
+            'Cannot upload directory', 'Could not create remote $remoteDir');
+      }
+      if (!await changeDirectory(remoteDir)) {
+        throw FTPConnectException('Cannot upload directory',
+            '$remoteDir not found or inaccessible !');
+      }
+
+      final List<FileSystemEntity> entities = localDir.listSync();
+      for (final FileSystemEntity entity in entities) {
+        final String name = basename(entity.path);
+        if (entity is File) {
+          await uploadFile(entity, sRemoteName: name, onProgress: onProgress);
+        } else if (entity is Directory) {
+          await uploadDir(entity, name);
+        }
+      }
+
+      await changeDirectory(currentDir);
+      return true;
     }
 
-    return Utils.retryAction(() => downloadDirRetry(), pRetryCount);
+    return uploadDir(pLocalDir, pRemoteDir);
   }
 
   /// check the existence of the Directory with the Name of [pDirectory].
   ///
   /// Returns `true` if the directory was changed successfully
   /// Returns `false` if the directory could not be changed (does not exist, no permissions or another error)
+  @override
   Future<bool> checkFolderExistence(String pDirectory) {
     return changeDirectory(pDirectory);
   }
@@ -283,24 +313,11 @@ class FTPConnect {
   ///
   /// Returns `true` if the directory exists or was created successfully
   /// Returns `false` if the directory not found and could not be created
+  @override
   Future<bool> createFolderIfNotExist(String pDirectory) async {
     if (!await checkFolderExistence(pDirectory)) {
       return makeDirectory(pDirectory);
     }
     return true;
   }
-}
-
-///Note that [list] and [mlsd] return content detailed
-///BUT [nlst] return only dir/file names inside the given directory
-enum ListCommand { nlst, list, mlsd }
-
-enum TransferType { auto, ascii, binary }
-
-enum TransferMode { active, passive }
-
-enum SecurityType { ftp, ftps, ftpes }
-
-extension CommandListTypeEnum on ListCommand {
-  String get describeEnum => toString().substring(toString().indexOf('.') + 1);
 }

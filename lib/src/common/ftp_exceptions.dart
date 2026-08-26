@@ -2,7 +2,7 @@ class FTPConnectException implements Exception {
   final String message;
   final String? response;
 
-  FTPConnectException(this.message, [this.response]);
+  const FTPConnectException(this.message, [this.response]);
 
   @override
   String toString() {

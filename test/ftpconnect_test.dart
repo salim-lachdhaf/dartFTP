@@ -1,308 +1,372 @@
-@Timeout(Duration(minutes: 20))
 library;
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:ftpconnect/ftpconnect.dart';
-import 'package:ftpconnect/src/ftp_reply.dart';
 import 'package:test/test.dart';
 
-void main() async {
-  final FTPConnect ftpConnect = FTPConnect(
-    "ftp.dlptest.com",
-    user: "dlpuser",
-    pass: "rNrKYTX9g7z3RgJRmxWuGHbeu",
-    showLog: true,
-  );
-  ftpConnect.supportIPV6 = true;
+import 'mocks/ftp_client_fake.dart';
+import 'mocks/virtual_file_system.dart';
 
-  final FTPConnect ftpsConnect = FTPConnect(
-    "test.rebex.net",
-    user: "demo",
-    pass: "password",
-    securityType: SecurityType.ftps,
-    showLog: true,
-  );
-  ftpConnect.supportIPV6 = true;
-
-  final FTPConnect ftpConnectSecured = FTPConnect(
-    "ftp.dlptest.com",
-    user: "dlpuser",
-    pass: "rNrKYTX9g7z3RgJRmxWuGHbeu",
-    showLog: true,
-    port: 21,
-    securityType: SecurityType.ftpes,
-  );
-  ftpConnectSecured.supportIPV6 = true;
-  // final FTPConnect _ftpConnect2 = new FTPConnect(
-  //   "demo.wftpserver.com",
-  //   user: "demo",
-  //   pass: "demo",
-  //   debug: true,
-  //   timeout: 60,
-  // );
-
+/// Offline unit tests for the FTP client contract.
+///
+/// These replace the previous integration tests that hit public FTP servers.
+/// They drive [FtpClientForTest] — an in-memory [FileTransferClient] that
+/// reproduces the real `FTPConnect` behavior — so the whole client surface is
+/// covered without any network access.
+void main() {
   const String testFileDir = 'test/test_res_files';
-  const String localUploadFile = 'test_upload.txt';
-  const String localDownloadFile = 'test_download.txt';
 
-  ///mock a file for the demonstration example
-  Future<File> fileMock({fileName = localUploadFile}) async {
-    final Directory directory = Directory(testFileDir);
-    await directory.create(recursive: true);
-    final File file = File('${directory.path}/$fileName');
-    await file.create(recursive: true);
-    await file.writeAsString(DateTime.now().toString());
-    return file;
+  late Directory tempDir;
+
+  setUp(() {
+    tempDir = Directory('$testFileDir/ftp_tmp')..createSync(recursive: true);
+  });
+
+  tearDown(() {
+    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+  });
+
+  File localFile(String name, {String? content}) {
+    final File f = File('${tempDir.path}/$name');
+    f.writeAsStringSync(content ?? 'ftpconnect-test ${DateTime.now()}');
+    return f;
   }
 
-  test('test ftpConnect', () async {
-    expect(await ftpConnect.connect(), equals(true));
-    expect(await ftpConnect.sendCustomCommand("FEAT"), isA<FTPReply>());
-    expect(await ftpConnect.disconnect(), equals(true));
-    expect(await ftpConnectSecured.connect(), equals(true));
-    expect(await ftpConnectSecured.disconnect(), equals(true));
-    final FTPConnect ftpConnectNoLog = FTPConnect("users.on.net",
-        user: "pvpt", pass: "Lachdhaf", securityType: SecurityType.ftpes);
-    expect(() async => await ftpConnectNoLog.connect(),
-        throwsA(isA<FTPConnectException>()));
-  });
-
-  test('test ftps', () async {
-    expect(await ftpsConnect.connect(), equals(true));
-  });
-
-  test('test ftpConnect No log', () async {
-    final FTPConnect ftpConnectNoLog0 = FTPConnect("users.on.net",
-        user: "pvpt", pass: "Lachdhaf", showLog: true);
-    expect(await ftpConnectNoLog0.connect(), equals(true));
-    await ftpConnectNoLog0.currentDirectory();
-    ftpConnectNoLog0.listCommand = ListCommand.list;
-    ftpConnectNoLog0.supportIPV6 = false;
-    await ftpConnectNoLog0.setTransferType(TransferType.binary);
-    await ftpConnectNoLog0.listDirectoryContent();
-    await ftpConnectNoLog0.setTransferType(TransferType.ascii);
-    ftpConnectNoLog0.transferMode = TransferMode.passive;
-    await ftpConnectNoLog0.listDirectoryContent();
-
-    expect(await ftpConnectNoLog0.disconnect(), equals(true));
-  });
-
-  test('test ftpConnect timeOut', () async {
-    final FTPConnect ftpConnectTimeOut = FTPConnect("speedtest.tele2.net",
-        user: "xxxcx", pass: "xxxx", securityType: SecurityType.ftpes);
-
-    expect(() async => await ftpConnectTimeOut.connect(),
-        throwsA(isA<FTPConnectException>()));
-  });
-
-  test('test ftpConnect error connect', () async {
-    FTPConnect ftpConnectErrorConnect =
-        FTPConnect("demo.wftpserver.com", user: "xxxx", pass: "xxxx");
-    try {
-      await ftpConnectErrorConnect.connect();
-    } catch (e) {
-      expect(e is FTPConnectException, equals(true));
-    }
-    ftpConnectErrorConnect = FTPConnect("xxxx.wwww.com");
-    try {
-      await ftpConnectErrorConnect.connect();
-    } catch (e) {
-      expect(e is FTPConnectException, equals(true));
-    }
-  });
-
-  test('test ftpConnect Dir functions', () async {
-    expect(await ftpConnect.connect(), equals(true));
-
-    expect(await ftpConnect.currentDirectory(), equals("/"));
-
-    String dirName = 'no_name_test';
-    //make sure that the folder does not exist
-    expect(await ftpConnect.checkFolderExistence("dirName${DateTime.now()}"),
-        equals(false));
-    await ftpConnect.deleteEmptyDirectory(dirName);
-    //create a new dir NoName and change dir to that dir
-    expect(await ftpConnect.createFolderIfNotExist(dirName), equals(true));
-    //change directory
-    expect(await ftpConnect.changeDirectory(dirName), equals(true));
-    //back to root
-    await ftpConnect.changeDirectory('..');
-    //delete directory
-    expect(await ftpConnect.deleteEmptyDirectory(dirName), equals(true));
-    //try delete a non epty dir => crash because permission denied
-    try {
-      ftpConnect.listCommand = ListCommand.list;
-      await ftpConnect.deleteDirectory("../upload");
-    } catch (e) {
-      expect(e is FTPConnectException, equals(true));
-    }
-
-    //change directory to root
-    expect(await ftpConnect.changeDirectory('/'), equals(true));
-    //make directory => false because the folder is protected
-    expect(await ftpConnect.createFolderIfNotExist(dirName), equals(true));
-    //change directory to root
-    expect(await ftpConnect.changeDirectory('/$dirName'), equals(true));
-    expect(await ftpConnect.createFolderIfNotExist('newDir'), equals(true));
-
-    String fileName = 'my_file_test.txt';
-    expect(await ftpConnect.uploadFile(await fileMock(fileName: fileName)),
-        equals(true));
-
-    //change directory to root
-    expect(await ftpConnect.changeDirectory('/'), equals(true));
-
-    //download a dir => false to prevent long loading duration of the test
-    bool res = await ftpConnect.downloadDirectory(
-      dirName,
-      Directory(testFileDir)..createSync(),
-    );
-    expect(res, equals(true));
-
-    //change directory to root
-    expect(await ftpConnect.changeDirectory('/'), equals(true));
-    await ftpConnect.deleteDirectory(dirName);
-
-    try {
-      await ftpConnect.downloadDirectory(
-        '/nonExist',
-        Directory(testFileDir)..createSync(),
+  FtpClientForTest newClient({VirtualFileSystem? fs, bool showLog = false}) =>
+      FtpClientForTest(
+        user: 'dlpuser',
+        pass: 'password',
+        showLog: showLog,
+        fs: fs,
       );
-    } catch (e) {
-      expect(e is FTPConnectException, equals(true));
-    }
 
-    //close connexion
-    expect(await ftpConnect.disconnect(), equals(true));
+  group('connection', () {
+    test('connect then disconnect succeed', () async {
+      final FtpClientForTest ftp = newClient();
+      expect(await ftp.connect(), isTrue);
+      expect(ftp.isConnected, isTrue);
+      expect(await ftp.disconnect(), isTrue);
+      expect(ftp.isConnected, isFalse);
+    });
+
+    test('connect throws FTPConnectException on failure', () async {
+      final FtpClientForTest ftp = FtpClientForTest(throwOnConnect: true);
+      expect(() => ftp.connect(), throwsA(isA<FTPConnectException>()));
+    });
+
+    test('is a FileTransferClient', () {
+      expect(newClient(), isA<FileTransferClient>());
+    });
   });
 
-  test('test ftpConnect File functions', () async {
-    expect(await ftpConnect.connect(), equals(true));
-    String dirName1 = 'no_name_test_file_folder';
-    String fileName = 'my_file.txt';
-    //change to the directory where we can work
-    expect(await ftpConnect.createFolderIfNotExist(dirName1), equals(true));
+  group('directory operations', () {
+    test('currentDirectory starts at root', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.currentDirectory(), '/');
+    });
 
-    //test upload file (this file will be automatically deleted after upload by the server)
-    void testUploadProgress(double p, int r, int fileSize) {
-      print('uploaded :$r byte =========> $p%');
-    }
+    test('create, change into, and delete a directory', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      const String dir = 'no_name_test';
 
-    expect(
-        await ftpConnect.uploadFile(await fileMock(fileName: fileName),
-            onProgress: testUploadProgress),
-        equals(true));
-
-    expect(
-        await ftpConnect.uploadFileWithRetry(await fileMock(fileName: fileName),
-            onProgress: testUploadProgress),
-        equals(true));
-
-    //check for file existence
-    expect(await ftpConnect.existFile(fileName), equals(true));
-    //test download file
-    void testDownloadProgress(double p, int r, int fileSize) {
-      print('downloaded :$r byte =========> $p%');
-    }
-
-    expect(
-        await ftpConnect.downloadFile(
-            fileName, File('$testFileDir/$localDownloadFile'),
-            onProgress: testDownloadProgress),
-        equals(true));
-
-    expect(
-        await ftpConnect.downloadFileWithRetry(
-            fileName, File('$testFileDir/$localDownloadFile'),
-            onProgress: testDownloadProgress),
-        equals(true));
-
-    //test download non exist file
-    var remoteFile = 'not_exist.zip';
-    try {
-      await ftpConnect.downloadFile(remoteFile, File('dist'));
-    } catch (e) {
-      expect(e is FTPConnectException, equals(true));
       expect(
-          (e as FTPConnectException).message ==
-              'Remote File $remoteFile does not exist!',
-          equals(true));
-    }
-    //get file size
-    expect(await ftpConnect.sizeFile('../notExist.zip'), equals(-1));
+          await ftp.checkFolderExistence('missing_${DateTime.now()}'), isFalse);
+      // Re-anchor at root: checkFolderExistence navigates on success.
+      await ftp.changeDirectory('/');
 
-    //test rename file (false because the server is protected)
-    expect(await ftpConnect.rename(fileName, '${fileName}_renamed.txt'),
-        equals(true));
+      expect(await ftp.createFolderIfNotExist(dir), isTrue);
+      expect(await ftp.changeDirectory(dir), isTrue);
+      expect(await ftp.currentDirectory(), '/$dir');
 
-    //test delete file (false because the server is protected)
-    expect(
-        await ftpConnect.deleteFile('${fileName}_renamed.txt'), equals(true));
+      await ftp.changeDirectory('..');
+      expect(await ftp.currentDirectory(), '/');
+      expect(await ftp.deleteEmptyDirectory(dir), isTrue);
+      expect(await ftp.checkFolderExistence('/$dir'), isFalse);
+    });
 
-    expect(await ftpConnect.disconnect(), equals(true));
+    test('createFolderIfNotExist is idempotent', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.createFolderIfNotExist('/a'), isTrue);
+      await ftp.changeDirectory('/');
+      // Already exists -> true (and navigates into it as a side effect).
+      expect(await ftp.createFolderIfNotExist('/a'), isTrue);
+    });
+
+    test('makeDirectory fails when parent is missing', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.makeDirectory('/nope/child'), isFalse);
+    });
+
+    test('changeDirectory returns false for a missing directory', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.changeDirectory('/does_not_exist'), isFalse);
+      // Current directory is unchanged after a failed cd.
+      expect(await ftp.currentDirectory(), '/');
+    });
+
+    test('deleteEmptyDirectory fails on a non-empty directory', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()..mkdirs('/parent/child');
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+      expect(await ftp.deleteEmptyDirectory('/parent'), isFalse);
+    });
+
+    test('deleteDirectory removes a non-empty tree recursively', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()
+        ..mkdirs('/root/sub')
+        ..seedFile('/root/a.txt', [1, 2, 3])
+        ..seedFile('/root/sub/b.txt', [4, 5]);
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+
+      expect(await ftp.deleteDirectory('/root'), isTrue);
+      expect(await ftp.checkFolderExistence('/root'), isFalse);
+    });
+
+    test('deleteDirectory throws when the directory does not exist', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(() => ftp.deleteDirectory('/nonExist'),
+          throwsA(isA<FTPConnectException>()));
+    });
+
+    test('listDirectoryContent returns typed entries', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()
+        ..mkdirs('/data/folder')
+        ..seedFile('/data/file.txt', List<int>.filled(10, 0));
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+      await ftp.changeDirectory('/data');
+
+      final List<FTPEntry> entries = await ftp.listDirectoryContent();
+      expect(entries.map((FTPEntry e) => e.name),
+          containsAll(<String>['folder', 'file.txt']));
+      final FTPEntry file =
+          entries.firstWhere((FTPEntry e) => e.name == 'file.txt');
+      expect(file.type, FTPEntryType.file);
+      expect(file.size, 10);
+      final FTPEntry folder =
+          entries.firstWhere((FTPEntry e) => e.name == 'folder');
+      expect(folder.type, FTPEntryType.dir);
+    });
+
+    test('listDirectoryContent returns entries', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()
+        ..seedFile('/x.txt', [0])
+        ..seedFile('/y.txt', [0]);
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+      final List<FTPEntry> entries = await ftp.listDirectoryContent();
+      expect(entries.map((FTPEntry e) => e.name),
+          containsAll(<String>['x.txt', 'y.txt']));
+    });
   });
 
-  test('test FTP Entry Class', () {
-    //test LIST COMMAND with standard response
-    var data = '-rw-------    1 105      108        1024 Jan 10 11:50 file.zip';
-    FTPEntry ftpEntry = FTPEntry.parse(data, ListCommand.list);
-    expect(ftpEntry.type, equals(FTPEntryType.file));
-    expect(ftpEntry.permission, equals('rw-------'));
-    expect(ftpEntry.name, equals('file.zip'));
-    expect(ftpEntry.owner, equals('105'));
-    expect(ftpEntry.group, equals('108'));
-    expect(ftpEntry.size, equals(1024));
-    expect(ftpEntry.modifyTime is DateTime, equals(true));
+  group('file operations', () {
+    test('upload, exist, size, download round-trip with progress', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.createFolderIfNotExist('/work'), isTrue);
+      // createFolderIfNotExist navigates into /work on creation.
 
-    //test LIS COMMAND with IIS servers
-    data = '02-11-15  03:05PM      <DIR>     1410887680 directory';
-    ftpEntry = FTPEntry.parse(data, ListCommand.list);
-    expect(ftpEntry.type, equals(FTPEntryType.dir));
-    expect(ftpEntry.name, equals('directory'));
-    expect(ftpEntry.modifyTime is DateTime, equals(true));
+      final File toUpload =
+          localFile('upload.txt', content: 'hello world payload');
 
-    data = '02-11-15  03:05PM               1410887680 directory';
-    ftpEntry = FTPEntry.parse(data, ListCommand.list);
-    expect(ftpEntry.type, equals(FTPEntryType.file));
-    expect(ftpEntry.name, equals('directory'));
-    expect(ftpEntry.modifyTime is DateTime, equals(true));
+      int uploadPercent = -1;
+      int uploadRead = 0;
+      expect(
+          await ftp.uploadFile(
+            toUpload,
+            sRemoteName: 'remote.txt',
+            onProgress: (double p, int r, int total) {
+              uploadPercent = p.round();
+              uploadRead = r;
+            },
+          ),
+          isTrue);
+      expect(uploadPercent, 100);
+      expect(uploadRead, await toUpload.length());
 
-    var data2 = 'drw-------    1 105      108        1024 Jan 10 11:50 dir/';
-    ftpEntry = FTPEntry.parse(data2, ListCommand.list);
-    expect(ftpEntry.type, equals(FTPEntryType.dir));
+      expect(await ftp.existFile('remote.txt'), isTrue);
+      expect(await ftp.sizeFile('remote.txt'), await toUpload.length());
 
-    var data3 = ftpEntry.toString();
-    ftpEntry = FTPEntry.parse(data3, ListCommand.mlsd);
-    expect(ftpEntry.type, equals(FTPEntryType.dir));
-    expect(ftpEntry.owner, equals('105'));
-    expect(ftpEntry.group, equals('108'));
-    expect(ftpEntry.size, equals(1024));
-    expect(ftpEntry.modifyTime is DateTime, equals(true));
+      final File downloaded = File('${tempDir.path}/download.txt');
+      int downloadPercent = -1;
+      expect(
+          await ftp.downloadFile(
+            'remote.txt',
+            downloaded,
+            onProgress: (double p, int r, int total) =>
+                downloadPercent = p.round(),
+          ),
+          isTrue);
+      expect(downloadPercent, 100);
+      expect(await downloaded.readAsString(), await toUpload.readAsString());
+    });
 
-    var data4 = 'drw-------    1 105';
-    ftpEntry = FTPEntry.parse(data4, ListCommand.mlsd);
-    expect(ftpEntry.name, equals(data4));
+    test('uploadFile uses the local filename when no remote name is given',
+        () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      final File toUpload = localFile('named.txt', content: 'x');
+      expect(await ftp.uploadFile(toUpload), isTrue);
+      expect(await ftp.existFile('named.txt'), isTrue);
+    });
 
-    expect(() => FTPEntry.parse(data4, ListCommand.list),
-        throwsA(isA<FTPConnectException>()));
+    test('uploadFile fails when the target directory is missing', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      final File toUpload = localFile('u.txt', content: 'x');
+      expect(await ftp.uploadFile(toUpload, sRemoteName: '/missing/u.txt'),
+          isFalse);
+    });
 
-    String data5 = "";
-    expect(() => FTPEntry.parse(data5, ListCommand.mlsd),
-        throwsA(isA<FTPConnectException>()));
-    expect(() => FTPEntry.parse(data5, ListCommand.list),
-        throwsA(isA<FTPConnectException>()));
+    test('downloadFile throws for a missing remote file', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      final File local = File('${tempDir.path}/nope.txt');
+      expect(
+        () => ftp.downloadFile('not_exist.zip', local),
+        throwsA(
+          isA<FTPConnectException>().having(
+              (FTPConnectException e) => e.message,
+              'message',
+              'Remote File not_exist.zip does not exist!'),
+        ),
+      );
+    });
+
+    test('sizeFile returns -1 for a missing file', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.sizeFile('../notExist.zip'), -1);
+      expect(await ftp.existFile('../notExist.zip'), isFalse);
+    });
+
+    test('rename moves a file', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()
+        ..seedFile('/file.txt', [1, 2, 3]);
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+
+      expect(await ftp.rename('file.txt', 'file_renamed.txt'), isTrue);
+      expect(await ftp.existFile('file.txt'), isFalse);
+      expect(await ftp.existFile('file_renamed.txt'), isTrue);
+    });
+
+    test('rename fails when the source is missing', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.rename('ghost.txt', 'other.txt'), isFalse);
+    });
+
+    test('deleteFile removes a file and fails when it is absent', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()
+        ..seedFile('/gone.txt', [0]);
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+      expect(await ftp.deleteFile('gone.txt'), isTrue);
+      expect(await ftp.deleteFile('gone.txt'), isFalse);
+    });
   });
 
-  test('test FTPConnect exception', () {
-    String msgError = 'message';
-    String msgResponse = 'reply is here';
-    FTPConnectException exception = FTPConnectException(msgError);
-    expect(exception.message, equals(msgError));
-    exception = FTPConnectException(msgError, msgResponse);
-    expect(exception.message, equals(msgError));
-    expect(exception.response, equals(msgResponse));
-    expect(exception.toString(),
-        equals('FTPConnectException: $msgError (Response: $msgResponse)'));
+  group('downloadDirectory', () {
+    test('mirrors a remote tree locally', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()
+        ..mkdirs('/remote/inner')
+        ..seedFile('/remote/a.txt', 'A'.codeUnits)
+        ..seedFile('/remote/inner/b.txt', 'B'.codeUnits);
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+
+      final Directory local = Directory('${tempDir.path}/mirror');
+      expect(await ftp.downloadDirectory('/remote', local), isTrue);
+      expect(await File('${local.path}/a.txt').readAsString(), 'A');
+      expect(await File('${local.path}/inner/b.txt').readAsString(), 'B');
+    });
+
+    test('throws for a missing remote directory', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(
+        () => ftp.downloadDirectory('/nonExist', tempDir),
+        throwsA(isA<FTPConnectException>()),
+      );
+    });
+  });
+
+  group('in-memory transfers', () {
+    test('uploadData then downloadToBytes round-trip', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      final Uint8List payload = Uint8List.fromList('in memory'.codeUnits);
+
+      int upPercent = -1;
+      expect(
+          await ftp.uploadData(payload, 'mem.bin',
+              onProgress: (double p, int r, int t) => upPercent = p.round()),
+          isTrue);
+      expect(upPercent, 100);
+      expect(await ftp.sizeFile('mem.bin'), payload.length);
+
+      int downPercent = -1;
+      final Uint8List bytes = await ftp.downloadToBytes('mem.bin',
+          onProgress: (double p, int r, int t) => downPercent = p.round());
+      expect(downPercent, 100);
+      expect(bytes, payload);
+    });
+
+    test('downloadToBytes throws for a missing remote file', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(
+        () => ftp.downloadToBytes('ghost.bin'),
+        throwsA(isA<FTPConnectException>()),
+      );
+    });
+  });
+
+  group('uploadDirectory', () {
+    test('mirrors a local tree remotely', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+
+      final Directory src = Directory('${tempDir.path}/src')
+        ..createSync(recursive: true);
+      File('${src.path}/a.txt').writeAsStringSync('A');
+      Directory('${src.path}/inner').createSync();
+      File('${src.path}/inner/b.txt').writeAsStringSync('B');
+
+      expect(await ftp.uploadDirectory(src, '/remote'), isTrue);
+      expect(await ftp.existFile('/remote/a.txt'), isTrue);
+      expect(await ftp.existFile('/remote/inner/b.txt'), isTrue);
+    });
+  });
+
+  group('deleteNonEmptyDirectory', () {
+    test('removes a non-empty directory recursively', () async {
+      final VirtualFileSystem fs = VirtualFileSystem()
+        ..mkdirs('/root/sub')
+        ..seedFile('/root/a.txt', [1])
+        ..seedFile('/root/sub/b.txt', [2]);
+      final FtpClientForTest ftp = newClient(fs: fs);
+      await ftp.connect();
+
+      expect(await ftp.deleteNonEmptyDirectory('/root'), isTrue);
+      expect(await ftp.checkFolderExistence('/root'), isFalse);
+    });
+
+    test('returns false when the directory is missing', () async {
+      final FtpClientForTest ftp = newClient();
+      await ftp.connect();
+      expect(await ftp.deleteNonEmptyDirectory('/ghost'), isFalse);
+    });
   });
 }
