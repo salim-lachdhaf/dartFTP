@@ -2,158 +2,157 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/dartssh2.dart' show SSHHostkeyVerifyHandler;
 import 'package:path/path.dart' as p;
 
-import '../common/ftp_entry.dart';
-import '../common/ftp_exceptions.dart';
-import '../common/file_transfer_client.dart';
-import '../common/utils.dart';
+import '../config/transfer_config.dart';
+import '../domain/entities/ftp_entry.dart';
+import '../domain/enums.dart';
+import '../domain/exceptions.dart';
+import '../domain/file_transfer_client.dart';
+import '../domain/logger.dart';
+import '../domain/progress.dart';
+import '../infrastructure/dartssh2_sftp_adapter.dart';
+import '../utils/utils.dart';
+import 'sftp_adapter.dart';
 
-/// A simple SFTP client built on top of the pure-Dart
-/// [dartssh2](https://pub.dev/packages/dartssh2) package.
+/// A simple SFTP client.
 ///
 /// It mirrors the public API of [FTPConnect] (both implement
-/// [FileTransferClient]) so that switching between FTP and SFTP requires
-/// minimal changes.
-class SFTPConnect extends FileTransferClient {
+/// [FileTransferClient]). The SSH/SFTP stack is injected through a
+/// [SftpConnector] (defaulting to a `dartssh2` implementation), which makes the
+/// real client testable with an in-memory adapter.
+class SFTPConnect implements FileTransferClient {
+  final String host;
+  final int port;
+  final String user;
+  final String pass;
+  final int timeout;
+  final Logger logger;
   final String? _privateKey;
   final String? _passphrase;
   final SSHHostkeyVerifyHandler? _onVerifyHostKey;
+  final SftpConnector _connector;
 
-  SSHClient? _client;
-  SftpClient? _sftp;
+  SftpAdapter? _adapter;
 
-  ///The remote directory used to resolve relative paths.
+  /// The remote directory used to resolve relative paths.
   String _currentDirectory = '.';
 
-  /// Create an SFTP Client instance.
+  /// Create an SFTP client instance.
   ///
   /// [host]: Hostname or IP Address
-  /// [port]: Port number (Defaults to 22)
+  /// [port]: Port number (defaults to 22)
   /// [user]: Username
   /// [pass]: Password (ignored when [privateKey] is provided)
   /// [privateKey]: A PEM/OpenSSH private key content, used instead of [pass]
   /// [passphrase]: The passphrase protecting [privateKey] (if any)
   /// [timeout]: Timeout in seconds for the socket/handshake/authentication
-  /// [showLog]: Enable Debug Logging
-  /// [logger]: custom logger
-  /// [onVerifyHostKey]: optional host key verification handler. When omitted,
-  /// every host key is accepted (only appropriate for trusted networks/tests).
+  /// [showLog]: Enable debug logging
+  /// [onVerifyHostKey]: optional host key verification handler
+  /// [connector]: Injectable SSH/SFTP stack (defaults to `dartssh2`)
   SFTPConnect(
-    super.host, {
-    super.port = 22,
-    super.user = 'anonymous',
-    super.pass = '',
+    this.host, {
+    this.port = 22,
+    this.user = 'anonymous',
+    this.pass = '',
     String? privateKey,
     String? passphrase,
-    super.timeout = 30,
-    super.showLog = false,
-    super.logger,
+    this.timeout = 30,
+    bool showLog = false,
+    Logger? logger,
     SSHHostkeyVerifyHandler? onVerifyHostKey,
+    SftpConnector? connector,
   })  : _privateKey = privateKey,
         _passphrase = passphrase,
-        _onVerifyHostKey = onVerifyHostKey;
+        _onVerifyHostKey = onVerifyHostKey,
+        logger = logger ?? Logger(isEnabled: showLog),
+        _connector = connector ?? const Dartssh2SftpConnector();
 
-  /// The underlying [SSHClient] in case advanced/native features are needed.
-  /// Only available after a successful [connect].
-  SSHClient? get client => _client;
+  /// Create an SFTP client from an [SftpConfig].
+  ///
+  /// Returns a fully-typed [SFTPConnect] (implementing [FileTransferClient]), so
+  /// the `dart:io` `File`/`Directory` helpers remain available.
+  factory SFTPConnect.fromConfig(SftpConfig config) => SFTPConnect(
+        config.host,
+        port: config.port ?? 22,
+        user: config.user,
+        pass: config.pass,
+        privateKey: config.privateKey,
+        passphrase: config.passphrase,
+        timeout: config.timeout,
+        showLog: config.showLog,
+        logger: config.logger,
+      );
 
-  /// The underlying [SftpClient]. Only available after a successful [connect].
-  SftpClient get sftpClient {
-    final sftp = _sftp;
-    if (sftp == null) {
-      throw FTPConnectException('SFTP session is not connected. '
-          'Call connect() first.');
+  SftpAdapter get _sftp {
+    final SftpAdapter? adapter = _adapter;
+    if (adapter == null) {
+      throw const FTPConnectException(
+          'SFTP session is not connected. Call connect() first.');
     }
-    return sftp;
+    return adapter;
   }
 
-  ///Resolve [path] relative to the current directory when it is not absolute.
+  /// Resolve [path] relative to the current directory when it is not absolute.
   String _resolve(String? path) {
-    if (path == null || path.isEmpty) return _currentDirectory;
-    if (p.posix.isAbsolute(path)) return p.posix.normalize(path);
-    return p.posix.normalize(p.posix.join(_currentDirectory, path));
+    if (path == null || path.isEmpty) {
+      return _currentDirectory;
+    }
+
+    if (p.posix.isAbsolute(path)) {
+      return p.posix.normalize(path);
+    }
+
+    return p.posix.normalize(
+      p.posix.join(_currentDirectory, path),
+    );
   }
 
-  /// Connect to the SSH server and open an SFTP session.
-  /// Returns `true` if connected successfully.
   @override
   Future<bool> connect() async {
     logger.log('Connecting...');
-    final Duration duration = Duration(seconds: timeout);
-
-    final SSHSocket socket;
-    try {
-      socket = await SSHSocket.connect(host, port, timeout: duration);
-    } catch (e) {
-      throw FTPConnectException(
-          'Could not connect to $host ($port)', e.toString());
-    }
-
-    try {
-      _client = SSHClient(
-        socket,
-        username: user,
-        onVerifyHostKey: _onVerifyHostKey,
-        onPasswordRequest: _privateKey == null ? () => pass : null,
-        identities: _privateKey != null
-            ? SSHKeyPair.fromPem(_privateKey!, _passphrase)
-            : null,
-        handshakeTimeout: duration,
-        authTimeout: duration,
-      );
-      await _client!.authenticated;
-      _sftp = await _client!.sftp();
-    } catch (e) {
-      throw FTPConnectException(
-          'Could not open the SFTP session', e.toString());
-    }
-
+    // A new session has its own server-side cwd; drop any path resolved
+    // against a previous session so relative paths start fresh.
+    _currentDirectory = '.';
+    _adapter = await _connector.connect(SftpConnectionConfig(
+      host: host,
+      port: port,
+      user: user,
+      pass: pass,
+      privateKey: _privateKey,
+      passphrase: _passphrase,
+      timeout: Duration(seconds: timeout),
+      onVerifyHostKey: _onVerifyHostKey,
+      logger: logger,
+    ));
     logger.log('Connected!');
     return true;
   }
 
-  /// Close the SFTP session and disconnect from the SSH server.
-  /// Returns `true` if disconnected successfully.
   @override
   Future<bool> disconnect() async {
     logger.log('Disconnecting...');
     try {
-      await _sftp?.close();
-    } catch (_) {
-      // Ignore
+      await _adapter?.close();
+    } catch (e) {
+      logger.log('Error while closing the SFTP session (ignored): $e');
     }
-
-    // Observe `done` as well: it may complete with an error while channels
-    // are being torn down, and an unobserved error would escape to the zone.
-    unawaited(_client?.done.catchError((_) {}));
-    try {
-      await _client?.close();
-    } catch (_) {
-      // Ignore
-    }
-    _sftp = null;
-    _client = null;
-
+    _adapter = null;
+    _currentDirectory = '.';
     logger.log('Disconnected!');
     return true;
   }
 
-  /// Returns the current working directory used to resolve relative paths.
   @override
   Future<String> currentDirectory() async => _currentDirectory;
 
-  /// Change into the Directory [sDirectory] (relative or absolute).
-  ///
-  /// Use `..` to navigate back.
-  /// Returns `true` if the directory exists and was changed successfully.
   @override
   Future<bool> changeDirectory(String sDirectory) async {
     final String target = _resolve(sDirectory);
     try {
-      final SftpFileAttrs attrs = await sftpClient.stat(target);
-      if (!attrs.isDirectory) return false;
+      final SftpFileStat stat = await _sftp.stat(target);
+      if (!stat.isDirectory) return false;
       _currentDirectory = target;
       return true;
     } catch (e) {
@@ -162,23 +161,15 @@ class SFTPConnect extends FileTransferClient {
     }
   }
 
-  /// Returns the content of the directory [sDirectory] (defaults to current).
   @override
-  Future<List<FTPEntry>> listDirectoryContent([String? sDirectory]) async {
-    final String target = _resolve(sDirectory);
-    final List<SftpName> content = await sftpClient.listdir(target);
-    return content
-        .where((SftpName e) => e.filename != '.' && e.filename != '..')
-        .map((SftpName e) => FTPEntry.sftp(e))
-        .toList();
+  Future<List<FTPEntry>> listDirectoryContent([String? sDirectory]) {
+    return _sftp.listdir(_resolve(sDirectory));
   }
 
-  /// Create a new Directory [sDirectory] in the current directory.
-  /// Returns `true` if the directory was created successfully.
   @override
   Future<bool> makeDirectory(String sDirectory) async {
     try {
-      await sftpClient.mkdir(_resolve(sDirectory));
+      await _sftp.mkdir(_resolve(sDirectory));
       return true;
     } catch (e) {
       logger.log('Cannot create directory $sDirectory: $e');
@@ -186,13 +177,10 @@ class SFTPConnect extends FileTransferClient {
     }
   }
 
-  /// Delete the empty Directory [sDirectory].
-  /// Returns `true` if the directory was deleted successfully.
   @override
-  Future<bool> deleteEmptyDirectory(String? sDirectory) async {
-    if (sDirectory == null) return false;
+  Future<bool> deleteDirectory(String sDirectory) async {
     try {
-      await sftpClient.rmdir(_resolve(sDirectory));
+      await _sftp.rmdir(_resolve(sDirectory));
       return true;
     } catch (e) {
       logger.log('Cannot delete directory $sDirectory: $e');
@@ -200,16 +188,22 @@ class SFTPConnect extends FileTransferClient {
     }
   }
 
-  /// Delete the Directory [sDirectory] and all of its content recursively.
-  /// Returns `true` if the directory was deleted successfully.
   @override
-  Future<bool> deleteDirectory(String sDirectory) async {
-    final String target = _resolve(sDirectory);
+  Future<bool> deleteNonEmptyDirectory(String sDirectory) async {
+    try {
+      return await _deleteNonEmptyDirectory(_resolve(sDirectory));
+    } catch (e) {
+      logger.log('Cannot delete directory $sDirectory: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _deleteNonEmptyDirectory(String target) async {
     final List<FTPEntry> content = await listDirectoryContent(target);
     for (final FTPEntry entry in content) {
       final String childPath = p.posix.join(target, entry.name);
       if (entry.type == FTPEntryType.dir) {
-        if (!await deleteDirectory(childPath)) {
+        if (!await _deleteNonEmptyDirectory(childPath)) {
           throw FTPConnectException("Couldn't delete folder ${entry.name}");
         }
       } else {
@@ -218,47 +212,29 @@ class SFTPConnect extends FileTransferClient {
         }
       }
     }
-    return deleteEmptyDirectory(target);
+    return deleteDirectory(target);
   }
 
-  /// Delete the Directory [sDirectory] even when it is not empty.
-  ///
-  /// Removes all of its content recursively then the directory itself.
-  /// Returns `false` (instead of throwing) when the directory does not exist
-  /// or cannot be removed.
   @override
-  Future<bool> deleteNonEmptyDirectory(String sDirectory) async {
+  Future<bool> checkFolderExistence(String pDirectory) async {
     try {
-      return await deleteDirectory(sDirectory);
-    } catch (e) {
-      logger.log('Cannot delete directory $sDirectory: $e');
-      return false;
-    }
-  }
-
-  /// Check the existence of the Directory [sDirectory].
-  @override
-  Future<bool> checkFolderExistence(String sDirectory) async {
-    try {
-      final SftpFileAttrs attrs = await sftpClient.stat(_resolve(sDirectory));
-      return attrs.isDirectory;
+      final SftpFileStat stat = await _sftp.stat(_resolve(pDirectory));
+      return stat.isDirectory;
     } catch (_) {
       return false;
     }
   }
 
-  /// Create the Directory [sDirectory] if it does not already exist.
   @override
-  Future<bool> createFolderIfNotExist(String sDirectory) async {
-    if (await checkFolderExistence(sDirectory)) return true;
-    return makeDirectory(sDirectory);
+  Future<bool> createFolderIfNotExist(String pDirectory) async {
+    if (await checkFolderExistence(pDirectory)) return true;
+    return makeDirectory(pDirectory);
   }
 
-  /// Rename a file (or directory) from [sOldName] to [sNewName].
   @override
   Future<bool> rename(String sOldName, String sNewName) async {
     try {
-      await sftpClient.rename(_resolve(sOldName), _resolve(sNewName));
+      await _sftp.rename(_resolve(sOldName), _resolve(sNewName));
       return true;
     } catch (e) {
       logger.log('Cannot rename $sOldName to $sNewName: $e');
@@ -266,12 +242,10 @@ class SFTPConnect extends FileTransferClient {
     }
   }
 
-  /// Delete the file [sFilename] from the server.
   @override
-  Future<bool> deleteFile(String? sFilename) async {
-    if (sFilename == null) return false;
+  Future<bool> deleteFile(String sFilename) async {
     try {
-      await sftpClient.remove(_resolve(sFilename));
+      await _sftp.remove(_resolve(sFilename));
       return true;
     } catch (e) {
       logger.log('Cannot delete file $sFilename: $e');
@@ -279,35 +253,30 @@ class SFTPConnect extends FileTransferClient {
     }
   }
 
-  /// Check the existence of the file [sFilename] on the server.
   @override
-  Future<bool> existFile(String sFilename) async {
-    return await sizeFile(sFilename) != -1;
-  }
+  Future<bool> existFile(String sFilename) async =>
+      await sizeFile(sFilename) != -1;
 
-  /// Returns the file [sFilename] size from server.
-  /// Returns -1 if the file does not exist.
   @override
   Future<int> sizeFile(String sFilename) async {
     try {
-      final SftpFileAttrs attrs = await sftpClient.stat(_resolve(sFilename));
-      return attrs.size ?? -1;
+      final SftpFileStat stat = await _sftp.stat(_resolve(sFilename));
+      return stat.size ?? -1;
     } catch (_) {
       return -1;
     }
   }
 
-  /// Upload the File [fFile] to the current directory.
-  /// If [sRemoteName] is set, it is used as the remote file name.
   @override
   Future<bool> uploadFile(
     File fFile, {
-    String sRemoteName = '',
+    String? sRemoteName,
     FileProgress? onProgress,
   }) async {
     logger.log('Upload File: ${fFile.path}');
-    final String remoteName =
-        sRemoteName.isEmpty ? p.basename(fFile.path) : sRemoteName;
+    final String remoteName = (sRemoteName == null || sRemoteName.isEmpty)
+        ? p.basename(fFile.path)
+        : sRemoteName;
     return _upload(
       remoteName,
       await fFile.length(),
@@ -316,18 +285,13 @@ class SFTPConnect extends FileTransferClient {
     );
   }
 
-  /// Download the Remote File [sRemoteName] to the local File [fFile].
   @override
   Future<bool> downloadFile(
-    String? sRemoteName,
+    String sRemoteName,
     File fFile, {
     FileProgress? onProgress,
   }) async {
-    if (sRemoteName == null) {
-      throw FTPConnectException('Remote file name is required');
-    }
     logger.log('Download $sRemoteName to ${fFile.path}');
-
     await fFile.parent.create(recursive: true);
     final IOSink sink = fFile.openWrite();
     try {
@@ -340,7 +304,6 @@ class SFTPConnect extends FileTransferClient {
     return true;
   }
 
-  /// Upload the in-memory bytes [data] to the current directory as [sRemoteName].
   @override
   Future<bool> uploadData(
     Uint8List data,
@@ -356,39 +319,23 @@ class SFTPConnect extends FileTransferClient {
     );
   }
 
-  /// Streams [source] ([total] bytes) into the remote file [sRemoteName],
-  /// reporting progress. Shared by [uploadFile] and [uploadData] so file-based
-  /// and in-memory uploads use the exact same path.
   Future<bool> _upload(
     String sRemoteName,
     int total,
     Stream<Uint8List> source, {
     FileProgress? onProgress,
   }) async {
-    final String remotePath = _resolve(sRemoteName);
-
-    final SftpFile remoteFile = await sftpClient.open(
-      remotePath,
-      mode: SftpFileOpenMode.create |
-          SftpFileOpenMode.write |
-          SftpFileOpenMode.truncate,
+    await _sftp.writeFile(
+      _resolve(sRemoteName),
+      source,
+      onProgress: onProgress == null
+          ? null
+          : (int sent) => onProgress(Utils.percent(sent, total), sent, total),
     );
-    try {
-      final SftpFileWriter writer = remoteFile.write(
-        source,
-        onProgress: onProgress == null
-            ? null
-            : (int sent) => onProgress(Utils.percent(sent, total), sent, total),
-      );
-      await writer.done;
-    } finally {
-      await remoteFile.close();
-    }
     logger.log('File Uploaded!');
     return true;
   }
 
-  /// Download the Remote File [sRemoteName] and return its content in memory.
   @override
   Future<Uint8List> downloadToBytes(
     String sRemoteName, {
@@ -401,41 +348,27 @@ class SFTPConnect extends FileTransferClient {
     return builder.takeBytes();
   }
 
-  /// Streams the remote file [sRemoteName], handing each chunk to [onChunk] and
-  /// reporting progress. Shared by [downloadFile] and [downloadToBytes] so
-  /// file-based and in-memory downloads use the exact same (streamed) path.
   Future<void> _download(
     String sRemoteName,
     void Function(Uint8List chunk) onChunk, {
     FileProgress? onProgress,
   }) async {
-    final String remotePath = _resolve(sRemoteName);
     final int total = await sizeFile(sRemoteName);
     if (total == -1) {
       throw FTPConnectException('Remote File $sRemoteName does not exist!');
     }
-
-    final SftpFile remoteFile = await sftpClient.open(remotePath);
-    try {
-      var read = 0;
-      await for (final Uint8List chunk in remoteFile.read()) {
-        onChunk(chunk);
-        if (onProgress != null) {
-          read += chunk.length;
-          onProgress(Utils.percent(read, total), read, total);
-        }
+    int read = 0;
+    await for (final Uint8List chunk in _sftp.readFile(_resolve(sRemoteName))) {
+      onChunk(chunk);
+      if (onProgress != null) {
+        read += chunk.length;
+        onProgress(Utils.percent(read, total), read, total);
       }
-    } finally {
-      await remoteFile.close();
     }
   }
 
-  /// Download the Remote Directory [pRemoteDir] to the local Directory [pLocalDir].
   @override
-  Future<bool> downloadDirectory(
-    String pRemoteDir,
-    Directory pLocalDir,
-  ) {
+  Future<bool> downloadDirectory(String pRemoteDir, Directory pLocalDir) {
     Future<bool> downloadDir(String remoteDir, Directory localDir) async {
       await localDir.create(recursive: true);
       final List<FTPEntry> content = await listDirectoryContent(remoteDir);
@@ -455,8 +388,6 @@ class SFTPConnect extends FileTransferClient {
     return downloadDir(_resolve(pRemoteDir), pLocalDir);
   }
 
-  /// Upload the local Directory [pLocalDir] recursively into the remote
-  /// directory [pRemoteDir] (created if it does not exist).
   @override
   Future<bool> uploadDirectory(
     Directory pLocalDir,
@@ -468,8 +399,7 @@ class SFTPConnect extends FileTransferClient {
         throw FTPConnectException(
             'Cannot upload directory', 'Could not create remote $remoteDir');
       }
-      final List<FileSystemEntity> entities = localDir.listSync();
-      for (final FileSystemEntity entity in entities) {
+      for (final FileSystemEntity entity in localDir.listSync()) {
         final String name = p.basename(entity.path);
         final String remoteChild = p.posix.join(remoteDir, name);
         if (entity is File) {

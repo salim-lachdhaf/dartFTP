@@ -1,3 +1,29 @@
+## [Unreleased]
+* **BREAKING**: renamed `deleteEmptyDirectory` to `deleteDirectory` (deletes only an empty directory) and the old recursive `deleteDirectory` to `deleteNonEmptyDirectory` (recursively deletes a folder and its content, returning `false` instead of throwing on failure).
+* `deleteNonEmptyDirectory` no longer navigates (`changeDirectory`) into the target directory; it addresses every entry by its full path, so the connection's current working directory is never touched.
+* `checkFolderExistence` (FTP & web clients) no longer navigates either: it lists the parent directory and looks for a matching entry instead of `CWD`-ing into the target and back.
+* Fixed a bug in `FTPConnect.downloadDirectory`: it restored the working directory with a single `changeDirectory('..')`, which only undoes a *one-level* `CWD`. For a multi-segment `pRemoteDir` (e.g. `/pub/data/reports`) this left the connection's cwd one level short of where it started. `downloadDirectory` is now path-based like `SFTPConnect.downloadDirectory` and never navigates.
+* `FTPConnect.uploadDirectory` is now path-based too (matching `SFTPConnect.uploadDirectory`): it no longer issues `PWD`/`CWD` round trips per directory level, addressing every file/folder by its full remote path instead.
+
+## [4.1.0] - 2026.08.27
+* **New shared contract** `FileTransferProtocol`: the web-safe, byte/path oriented core interface implemented by every client. `FileTransferClient` now extends it, adding the `dart:io` `File`/`Directory` helpers (native only).
+* **Config-driven creation**: added `FtpConfig`/`SftpConfig`/`WebConfig` and the `FTPConnect.fromConfig`, `SFTPConnect.fromConfig`, `FtpWebClient.fromConfig` constructors, so you can build a fully-typed client from a single config object.
+* **Web support**: new `dart:io`-free client `FtpWebClient`, exposed through the dedicated `package:ftpconnect/ftpconnect_web.dart` entry point.
+  * Delegates FTP/FTPS/FTPES/SFTP operations to a remote HTTP proxy (e.g. a FastAPI backend) so the package works on Flutter Web / browsers, which cannot open raw FTP/SSH sockets.
+  * Proxy URL defaults to `https://me.test.ftpweb.com` (override via `baseUrl`).
+  * Configurable REST endpoints via `FtpWebRoutes`, injectable HTTP layer (`WebApiClient`) for testing, and byte-based transfers (`uploadData`/`downloadToBytes`).
+* Added the `http` dependency (used only by the web client).
+
+## [4.0.0] - 2026.08.27
+* **Clean-architecture rewrite** for testability: the network layer is now injected through ports.
+  * FTP: `FTPConnect` accepts a `SocketConnector` (defaults to a `dart:io` implementation, `IOSocketConnector`).
+  * SFTP: `SFTPConnect` accepts a `SftpConnector` (defaults to a `dartssh2` implementation, `Dartssh2SftpConnector`).
+  * The whole client surface is now unit-tested offline against the *real* clients using in-memory fakes (no network, no reimplementation of the client logic).
+* Rewrote the FTP control-channel response parser to be stream-based and RFC 959 multi-line aware (replaces the previous polling loop).
+* **BREAKING**: `FileTransferClient` is now a pure interface (it no longer holds the connection settings/constructor); each concrete client owns its own configuration.
+* **BREAKING**: removed the `dartssh2`-typed `client` / `sftpClient` getters from `SFTPConnect`; inject a custom `SftpConnector`/`SftpAdapter` for advanced use.
+* **BREAKING**: `FTPEntry.sftp(SftpName)` replaced by the transport-agnostic `FTPEntry.details(...)` factory (the SFTP adapter maps into it).
+
 ## [3.0.0] -  2026.08.27
 * Add `uploadDirectory` to recursively upload a local folder to the server (FTP & SFTP)
 * Add in-memory transfers: `uploadData(Uint8List, ...)` and `downloadToBytes(...)` (FTP & SFTP)

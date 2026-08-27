@@ -1,27 +1,24 @@
 library;
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ftpconnect/ftpconnect.dart';
 import 'package:test/test.dart';
 
-import 'mocks/sftp_client_fake.dart';
+import 'mocks/fake_sftp_adapter.dart';
 import 'mocks/virtual_file_system.dart';
 
-/// Offline unit tests for the SFTP client contract.
-///
-/// These replace the previous integration tests that hit the public Rebex
-/// SFTP server. They drive [SftpClientForTest] — an in-memory
-/// [FileTransferClient] that reproduces the real `SFTPConnect` behavior — so
-/// the whole client surface is covered without any network access.
+/// Offline tests exercising the *real* [SFTPConnect] client end to end through
+/// an injected in-memory [FakeSftpConnector]. The actual client logic (path
+/// resolution, recursion, progress, streaming) runs without any network.
 void main() {
-  const String testFileDir = 'test/test_res_files';
-
+  const String testFileDir = 'test/UnitTestSFTP_tmp';
   late Directory tempDir;
 
   setUp(() {
-    tempDir = Directory('$testFileDir/sftp_tmp')..createSync(recursive: true);
+    tempDir = Directory(testFileDir)..createSync(recursive: true);
   });
 
   tearDown(() {
@@ -30,323 +27,197 @@ void main() {
 
   File localFile(String name, {String? content}) {
     final File f = File('${tempDir.path}/$name');
-    f.writeAsStringSync(content ?? 'ftpconnect-sftp-test ${DateTime.now()}');
+    f.writeAsStringSync(content ?? 'sftp-test-payload');
     return f;
   }
 
-  /// A filesystem pre-seeded to look like a typical read-only server.
-  VirtualFileSystem readOnlyFs() => VirtualFileSystem()
-    ..seedFile('/readme.txt', 'welcome to the test server'.codeUnits)
-    ..mkdirs('/pub/example')
-    ..seedFile('/pub/example/readme.txt', 'example'.codeUnits);
-
-  SftpClientForTest newClient({VirtualFileSystem? fs, bool showLog = false}) =>
-      SftpClientForTest(
-        user: 'demo',
-        pass: 'password',
-        showLog: showLog,
-        fs: fs,
+  SFTPConnect newClient(FakeSftpConnector connector) => SFTPConnect(
+        'example.com',
+        user: 'user',
+        pass: 'pass',
+        connector: connector,
       );
+
+  Future<SFTPConnect> connected(FakeSftpConnector connector) async {
+    final SFTPConnect sftp = newClient(connector);
+    await sftp.connect();
+    return sftp;
+  }
 
   group('connection', () {
     test('connect then disconnect succeed', () async {
-      final SftpClientForTest sftp = newClient();
+      final sftp = newClient(FakeSftpConnector());
       expect(await sftp.connect(), isTrue);
-      expect(sftp.isConnected, isTrue);
       expect(await sftp.disconnect(), isTrue);
-      expect(sftp.isConnected, isFalse);
     });
 
-    test('connect throws FTPConnectException on failure', () async {
-      final SftpClientForTest sftp = SftpClientForTest(throwOnConnect: true);
+    test('connect throws FTPConnectException on failure', () {
+      final sftp = newClient(FakeSftpConnector(throwOnConnect: true));
       expect(() => sftp.connect(), throwsA(isA<FTPConnectException>()));
     });
 
+    test('operations before connect throw', () {
+      final sftp = newClient(FakeSftpConnector());
+      expect(() => sftp.listDirectoryContent('/'),
+          throwsA(isA<FTPConnectException>()));
+    });
+
     test('is a FileTransferClient', () {
-      expect(newClient(), isA<FileTransferClient>());
+      expect(newClient(FakeSftpConnector()), isA<FileTransferClient>());
     });
   });
 
-  group('read-only operations', () {
-    test('lists the root directory and returns entries', () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      final List<FTPEntry> entries = await sftp.listDirectoryContent();
-      expect(entries, isNotEmpty);
-      expect(entries.any((FTPEntry e) => e.name == 'readme.txt'), isTrue);
-      expect(entries.every((FTPEntry e) => e.name != '.' && e.name != '..'),
-          isTrue);
-    });
+  group('directory navigation', () {
+    test('changeDirectory resolves relative and absolute paths', () async {
+      final fs = VirtualFileSystem()..mkdirs('/pub/example');
+      final sftp = await connected(FakeSftpConnector(fs: fs));
 
-    test('lists directory content', () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      final List<FTPEntry> entries = await sftp.listDirectoryContent();
-      expect(entries.map((FTPEntry e) => e.name), contains('readme.txt'));
-    });
-
-    test('changeDirectory / currentDirectory navigate remote paths', () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      expect(await sftp.currentDirectory(), '.');
-      expect(await sftp.changeDirectory('/pub/example'), isTrue);
+      expect(await sftp.changeDirectory('/pub'), isTrue);
+      expect(await sftp.currentDirectory(), '/pub');
+      expect(await sftp.changeDirectory('example'), isTrue);
       expect(await sftp.currentDirectory(), '/pub/example');
-      // Missing directories return false, not throw.
-      expect(await sftp.changeDirectory('/does_not_exist_dir_xyz'), isFalse);
-      // ...and leave the working directory untouched.
-      expect(await sftp.currentDirectory(), '/pub/example');
+      expect(await sftp.changeDirectory('..'), isTrue);
+      expect(await sftp.currentDirectory(), '/pub');
     });
 
-    test('existFile / sizeFile against a known remote file', () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      expect(await sftp.existFile('readme.txt'), isTrue);
-      expect(await sftp.sizeFile('readme.txt'), greaterThan(0));
-      expect(await sftp.existFile('no_such_file_ever.zzz'), isFalse);
-      expect(await sftp.sizeFile('no_such_file_ever.zzz'), -1);
+    test('changeDirectory fails on a missing/target-is-file path', () async {
+      final fs = VirtualFileSystem()..seedFile('/file.txt', utf8.encode('x'));
+      final sftp = await connected(FakeSftpConnector(fs: fs));
+      expect(await sftp.changeDirectory('/nope'), isFalse);
+      expect(await sftp.changeDirectory('/file.txt'), isFalse);
     });
 
-    test('checkFolderExistence detects directories without navigating',
-        () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      expect(await sftp.checkFolderExistence('/pub'), isTrue);
-      // Unlike FTP, this does NOT change the working directory.
-      expect(await sftp.currentDirectory(), '.');
-      expect(await sftp.checkFolderExistence('/no_such_dir_ever'), isFalse);
-    });
-
-    test('downloadFile writes the remote file locally with progress', () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      final File local = File('${tempDir.path}/sftp_download.txt');
-
-      int lastPercent = -1;
-      int lastRead = 0;
-      int lastTotal = 0;
-      expect(
-          await sftp.downloadFile(
-            'readme.txt',
-            local,
-            onProgress: (double p, int r, int total) {
-              lastPercent = p.round();
-              lastRead = r;
-              lastTotal = total;
-            },
-          ),
-          isTrue);
-
-      expect(await local.exists(), isTrue);
-      final int length = await local.length();
-      expect(length, greaterThan(0));
-      expect(lastTotal, length);
-      expect(lastRead, length);
-      expect(lastPercent, 100);
-    });
-
-    test('downloadFile throws for missing remote files', () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      final File local = File('${tempDir.path}/should_not_exist.bin');
-      expect(
-        () => sftp.downloadFile('no_such_file_ever.zzz', local),
-        throwsA(isA<FTPConnectException>()),
-      );
-    });
-
-    test('downloadFile throws when the remote name is null', () async {
-      final SftpClientForTest sftp = newClient(fs: readOnlyFs());
-      await sftp.connect();
-      expect(
-        () => sftp.downloadFile(null, File('${tempDir.path}/x.bin')),
-        throwsA(isA<FTPConnectException>()),
-      );
+    test('makeDirectory / createFolderIfNotExist / deleteDirectory', () async {
+      final sftp = await connected(FakeSftpConnector());
+      expect(await sftp.makeDirectory('data'), isTrue);
+      expect(await sftp.checkFolderExistence('data'), isTrue);
+      expect(await sftp.createFolderIfNotExist('data'), isTrue);
+      expect(await sftp.deleteDirectory('data'), isTrue);
+      expect(await sftp.checkFolderExistence('data'), isFalse);
     });
   });
 
-  group('write operations', () {
-    test('upload, exist, size, download, then delete round-trip', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
+  group('listing', () {
+    test('listDirectoryContent returns typed entries', () async {
+      final fs = VirtualFileSystem()
+        ..seedFile('/readme.txt', utf8.encode('welcome'))
+        ..mkdirs('/pub');
+      final sftp = await connected(FakeSftpConnector(fs: fs));
 
-      final File toUpload =
-          localFile('sftp_write_upload.txt', content: 'hello from ftpconnect');
-      const String remoteName = 'sftp_write_upload.txt';
-
-      int uploadPercent = -1;
-      expect(
-          await sftp.uploadFile(
-            toUpload,
-            sRemoteName: remoteName,
-            onProgress: (double p, int r, int t) => uploadPercent = p.round(),
-          ),
-          isTrue);
-      expect(uploadPercent, 100);
-
-      expect(await sftp.existFile(remoteName), isTrue);
-      expect(await sftp.sizeFile(remoteName), await toUpload.length());
-
-      final File downloaded = File('${tempDir.path}/sftp_write_download.txt');
-      expect(await sftp.downloadFile(remoteName, downloaded), isTrue);
-      expect(await downloaded.readAsString(), await toUpload.readAsString());
-
-      expect(await sftp.deleteFile(remoteName), isTrue);
-      expect(await sftp.existFile(remoteName), isFalse);
-    });
-
-    test('uploadFile uses the local filename when no remote name is given',
-        () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      final File toUpload = localFile('by_name.txt', content: 'x');
-      expect(await sftp.uploadFile(toUpload), isTrue);
-      expect(await sftp.existFile('by_name.txt'), isTrue);
-    });
-
-    test('makeDirectory / createFolderIfNotExist / deleteEmptyDirectory',
-        () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      const String dirName = 'ftpconnect_test_dir';
-
-      expect(await sftp.checkFolderExistence(dirName), isFalse);
-      expect(await sftp.createFolderIfNotExist(dirName), isTrue);
-      expect(await sftp.checkFolderExistence(dirName), isTrue);
-      // Idempotent.
-      expect(await sftp.createFolderIfNotExist(dirName), isTrue);
-      expect(await sftp.deleteEmptyDirectory(dirName), isTrue);
-      expect(await sftp.checkFolderExistence(dirName), isFalse);
-    });
-
-    test('deleteEmptyDirectory returns false for a null argument', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      expect(await sftp.deleteEmptyDirectory(null), isFalse);
-    });
-
-    test('deleteFile returns false for a null argument', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      expect(await sftp.deleteFile(null), isFalse);
-    });
-
-    test('rename moves a remote file', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      final File toUpload = localFile('sftp_rename_src.txt');
-      const String src = 'sftp_rename_src.txt';
-      const String dst = 'sftp_rename_dst.txt';
-
-      expect(await sftp.uploadFile(toUpload, sRemoteName: src), isTrue);
-      expect(await sftp.rename(src, dst), isTrue);
-      expect(await sftp.existFile(src), isFalse);
-      expect(await sftp.existFile(dst), isTrue);
-      expect(await sftp.deleteFile(dst), isTrue);
-    });
-
-    test('rename fails when the source is missing', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      expect(await sftp.rename('ghost.txt', 'x.txt'), isFalse);
-    });
-
-    test('deleteDirectory removes a non-empty folder recursively', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      const String root = 'ftpconnect_test_tree';
-      expect(await sftp.makeDirectory(root), isTrue);
-      expect(await sftp.changeDirectory(root), isTrue);
-      expect(await sftp.makeDirectory('sub'), isTrue);
-
-      final File f1 = localFile('t1.txt', content: 'one');
-      expect(await sftp.uploadFile(f1, sRemoteName: 't1.txt'), isTrue);
-      expect(await sftp.changeDirectory('sub'), isTrue);
-      final File f2 = localFile('t2.txt', content: 'two');
-      expect(await sftp.uploadFile(f2, sRemoteName: 't2.txt'), isTrue);
-
-      // Back to root and delete the whole tree.
-      expect(await sftp.changeDirectory('/'), isTrue);
-      expect(await sftp.deleteDirectory(root), isTrue);
-      expect(await sftp.checkFolderExistence(root), isFalse);
-    });
-
-    test('downloadDirectory mirrors a remote tree locally', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      const String remoteRoot = 'ftpconnect_dl';
-      expect(await sftp.makeDirectory(remoteRoot), isTrue);
-      expect(await sftp.changeDirectory(remoteRoot), isTrue);
-      expect(await sftp.makeDirectory('inner'), isTrue);
-
-      final File a = localFile('a.txt', content: 'A');
-      expect(await sftp.uploadFile(a, sRemoteName: 'a.txt'), isTrue);
-      expect(await sftp.changeDirectory('inner'), isTrue);
-      final File b = localFile('b.txt', content: 'B');
-      expect(await sftp.uploadFile(b, sRemoteName: 'b.txt'), isTrue);
-
-      expect(await sftp.changeDirectory('/'), isTrue);
-      final Directory local = Directory('${tempDir.path}/$remoteRoot');
-      expect(await sftp.downloadDirectory(remoteRoot, local), isTrue);
-
-      expect(await File('${local.path}/a.txt').readAsString(), 'A');
-      expect(await File('${local.path}/inner/b.txt').readAsString(), 'B');
-    });
-
-    test('uploadDirectory mirrors a local tree remotely', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-
-      final Directory src = Directory('${tempDir.path}/src')
-        ..createSync(recursive: true);
-      File('${src.path}/a.txt').writeAsStringSync('A');
-      Directory('${src.path}/inner').createSync();
-      File('${src.path}/inner/b.txt').writeAsStringSync('B');
-
-      expect(await sftp.uploadDirectory(src, 'remote_up'), isTrue);
-      expect(await sftp.existFile('remote_up/a.txt'), isTrue);
-      expect(await sftp.existFile('remote_up/inner/b.txt'), isTrue);
+      final entries = await sftp.listDirectoryContent('/');
+      expect(entries.map((e) => e.name), containsAll(['readme.txt', 'pub']));
+      expect(entries.firstWhere((e) => e.name == 'pub').type, FTPEntryType.dir);
+      final file = entries.firstWhere((e) => e.name == 'readme.txt');
+      expect(file.type, FTPEntryType.file);
+      expect(file.size, 7);
     });
   });
 
-  group('in-memory transfers', () {
-    test('uploadData then downloadToBytes round-trip', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      final Uint8List payload = Uint8List.fromList('in memory'.codeUnits);
+  group('file transfers', () {
+    test('uploadFile then downloadFile round-trip', () async {
+      final fs = VirtualFileSystem();
+      final sftp = await connected(FakeSftpConnector(fs: fs));
+      final File src = localFile('up.txt', content: 'hello sftp');
 
-      expect(await sftp.uploadData(payload, 'mem.bin'), isTrue);
-      expect(await sftp.sizeFile('mem.bin'), payload.length);
+      expect(await sftp.uploadFile(src, sRemoteName: 'remote.txt'), isTrue);
+      expect(fs.isFile('/remote.txt'), isTrue);
 
-      final Uint8List bytes = await sftp.downloadToBytes('mem.bin');
-      expect(bytes, payload);
+      final File dst = File('${tempDir.path}/down.txt');
+      expect(await sftp.downloadFile('remote.txt', dst), isTrue);
+      expect(dst.readAsStringSync(), 'hello sftp');
+    });
+
+    test('uploadData then downloadToBytes round-trip with progress', () async {
+      final sftp = await connected(FakeSftpConnector());
+      final Uint8List data =
+          Uint8List.fromList(utf8.encode('some in-memory content here'));
+
+      final List<double> up = <double>[];
+      expect(
+          await sftp.uploadData(data, 'mem.bin',
+              onProgress: (pct, _, __) => up.add(pct)),
+          isTrue);
+      expect(up.last, 100);
+
+      final List<double> down = <double>[];
+      final Uint8List back = await sftp.downloadToBytes('mem.bin',
+          onProgress: (pct, _, __) => down.add(pct));
+      expect(back, equals(data));
+      expect(down.last, 100);
     });
 
     test('downloadToBytes throws for a missing remote file', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      expect(
-        () => sftp.downloadToBytes('ghost.bin'),
-        throwsA(isA<FTPConnectException>()),
-      );
+      final sftp = await connected(FakeSftpConnector());
+      expect(() => sftp.downloadToBytes('missing.txt'),
+          throwsA(isA<FTPConnectException>()));
+    });
+
+    test('sizeFile / existFile', () async {
+      final fs = VirtualFileSystem()..seedFile('/f.txt', utf8.encode('12345'));
+      final sftp = await connected(FakeSftpConnector(fs: fs));
+      expect(await sftp.sizeFile('/f.txt'), 5);
+      expect(await sftp.existFile('/f.txt'), isTrue);
+      expect(await sftp.existFile('/ghost'), isFalse);
+    });
+
+    test('rename moves a remote file', () async {
+      final fs = VirtualFileSystem()..seedFile('/old.txt', utf8.encode('x'));
+      final sftp = await connected(FakeSftpConnector(fs: fs));
+      expect(await sftp.rename('/old.txt', '/new.txt'), isTrue);
+      expect(fs.isFile('/new.txt'), isTrue);
+      expect(await sftp.rename('/absent', '/x'), isFalse);
+    });
+
+    test('deleteFile removes a remote file', () async {
+      final fs = VirtualFileSystem()..seedFile('/gone.txt', utf8.encode('x'));
+      final sftp = await connected(FakeSftpConnector(fs: fs));
+      expect(await sftp.deleteFile('/gone.txt'), isTrue);
+      expect(fs.isFile('/gone.txt'), isFalse);
     });
   });
 
-  group('deleteNonEmptyDirectory', () {
-    test('removes a non-empty directory recursively', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      expect(await sftp.makeDirectory('root'), isTrue);
-      final File a = localFile('a.txt', content: 'A');
-      expect(await sftp.uploadFile(a, sRemoteName: 'root/a.txt'), isTrue);
+  group('recursive directory operations', () {
+    test('deleteNonEmptyDirectory removes a non-empty tree', () async {
+      final fs = VirtualFileSystem()
+        ..seedFile('/root/a.txt', utf8.encode('a'))
+        ..seedFile('/root/sub/b.txt', utf8.encode('b'));
+      final sftp = await connected(FakeSftpConnector(fs: fs));
 
-      expect(await sftp.deleteNonEmptyDirectory('root'), isTrue);
-      expect(await sftp.checkFolderExistence('root'), isFalse);
+      expect(await sftp.deleteNonEmptyDirectory('/root'), isTrue);
+      expect(fs.exists('/root'), isFalse);
     });
 
-    test('returns false when the directory is missing', () async {
-      final SftpClientForTest sftp = newClient();
-      await sftp.connect();
-      expect(await sftp.deleteNonEmptyDirectory('ghost'), isFalse);
+    test('deleteNonEmptyDirectory returns false for a missing directory',
+        () async {
+      final sftp = await connected(FakeSftpConnector());
+      expect(await sftp.deleteNonEmptyDirectory('/absent'), isFalse);
+    });
+
+    test('downloadDirectory mirrors a remote tree locally', () async {
+      final fs = VirtualFileSystem()
+        ..seedFile('/tree/one.txt', utf8.encode('one'))
+        ..seedFile('/tree/nested/two.txt', utf8.encode('two'));
+      final sftp = await connected(FakeSftpConnector(fs: fs));
+
+      final Directory out = Directory('${tempDir.path}/mirror');
+      expect(await sftp.downloadDirectory('/tree', out), isTrue);
+      expect(File('${out.path}/one.txt').readAsStringSync(), 'one');
+      expect(File('${out.path}/nested/two.txt').readAsStringSync(), 'two');
+    });
+
+    test('uploadDirectory mirrors a local tree remotely', () async {
+      final fs = VirtualFileSystem();
+      final sftp = await connected(FakeSftpConnector(fs: fs));
+
+      final Directory local = Directory('${tempDir.path}/src')
+        ..createSync(recursive: true);
+      File('${local.path}/x.txt').writeAsStringSync('X');
+      Directory('${local.path}/inner').createSync();
+      File('${local.path}/inner/y.txt').writeAsStringSync('Y');
+
+      expect(await sftp.uploadDirectory(local, '/uploaded'), isTrue);
+      expect(fs.isFile('/uploaded/x.txt'), isTrue);
+      expect(fs.isFile('/uploaded/inner/y.txt'), isTrue);
     });
   });
 }

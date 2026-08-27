@@ -1,163 +1,218 @@
 library;
 
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:ftpconnect/ftpconnect.dart';
-import 'package:ftpconnect/src/ftp/ftp_reply.dart';
-import 'package:ftpconnect/src/common/utils.dart';
+import 'package:ftpconnect/src/ftp/ftp_response_reader.dart';
+import 'package:ftpconnect/src/utils/utils.dart';
 import 'package:test/test.dart';
 
-/// Offline unit tests for the pure (network-free) logic of the package.
-///
-/// Unlike the integration suites, these run without any FTP/SFTP server and
-/// are therefore safe to execute in CI.
+/// A minimal [RawSocketConnection] that only replays a scripted byte stream.
+class _ScriptedConnection implements RawSocketConnection {
+  final StreamController<Uint8List> _controller = StreamController<Uint8List>();
+
+  @override
+  Stream<Uint8List> get inbound => _controller.stream;
+
+  void feed(String text) =>
+      _controller.add(Uint8List.fromList(utf8.encode(text)));
+
+  void done() => _controller.close();
+
+  @override
+  void add(List<int> data) {}
+  @override
+  Future<void> flush() async {}
+  @override
+  Future<RawSocketConnection> secure() async => this;
+  @override
+  Future<void> close() async => _controller.close();
+  @override
+  void destroy() => _controller.close();
+}
+
 void main() {
-  group('Utils.parsePort', () {
+  group('Utils.percent', () {
+    test('computes a rounded percentage', () {
+      expect(Utils.percent(50, 200), 25);
+      expect(Utils.percent(1, 3), 33.33);
+    });
+
+    test('returns 100 for unknown/zero totals and never exceeds 100', () {
+      expect(Utils.percent(10, 0), 100);
+      expect(Utils.percent(200, 100), 100);
+    });
+  });
+
+  group('Utils port/host parsing', () {
     test('parses a standard PASV response', () {
       const response = '227 Entering Passive Mode (192,168,8,36,8,75).';
-      // 8 * 256 + 75 = 2123
       expect(Utils.parsePort(response, false), 2123);
-      expect(Utils.parsePortPASV(response), 2123);
+      expect(Utils.parseHostPASV(response), '192.168.8.36');
     });
 
     test('parses an EPSV (extended passive) response', () {
       const response = '229 Entering Extended Passive Mode (|||6446|)';
       expect(Utils.parsePort(response, true), 6446);
-      expect(Utils.parsePortEPSV(response), 6446);
+      expect(Utils.parseHostPASV(response), isNull);
     });
 
     test('throws when the PASV response is malformed', () {
       expect(() => Utils.parsePortPASV('227 no parentheses here'),
-          throwsA(isA<Error>()));
+          throwsA(isA<FTPConnectException>()));
+    });
+
+    test('throws when the EPSV response is malformed', () {
+      expect(() => Utils.parsePortEPSV('229 no parentheses here'),
+          throwsA(isA<FTPConnectException>()));
+    });
+
+    test('throws when the PASV response has too few segments', () {
+      expect(() => Utils.parsePortPASV('227 Entering Passive Mode (192)'),
+          throwsA(isA<FTPConnectException>()));
     });
   });
 
   group('FTPReply', () {
     test('isSuccessCode is true only for 2xx codes', () {
       expect(FTPReply(200, 'ok').isSuccessCode(), isTrue);
-      expect(FTPReply(226, 'transfer complete').isSuccessCode(), isTrue);
+      expect(FTPReply(226, 'done').isSuccessCode(), isTrue);
       expect(FTPReply(299, 'ok').isSuccessCode(), isTrue);
-      expect(FTPReply(150, 'opening data').isSuccessCode(), isFalse);
-      expect(FTPReply(331, 'need password').isSuccessCode(), isFalse);
+      expect(FTPReply(150, 'opening').isSuccessCode(), isFalse);
+      expect(FTPReply(331, 'need pass').isSuccessCode(), isFalse);
       expect(FTPReply(550, 'error').isSuccessCode(), isFalse);
     });
-
-    test('exposes code/message and a readable toString', () {
-      final reply = FTPReply(220, 'welcome');
-      expect(reply.code, 220);
-      expect(reply.message, 'welcome');
-      expect(reply.toString(), 'FTPReply =  [code= 220, message= welcome]');
-    });
   });
 
-  group('FTPConnectException', () {
-    test('keeps message and optional response', () {
-      final withResponse = FTPConnectException('boom', 'server said no');
-      expect(withResponse.message, 'boom');
-      expect(withResponse.response, 'server said no');
-      expect(withResponse.toString(),
-          'FTPConnectException: boom (Response: server said no)');
-
-      final withoutResponse = FTPConnectException('boom');
-      expect(withoutResponse.response, isNull);
-    });
-  });
-
-  group('FTPEntry.parse - LIST', () {
-    test('parses a standard unix listing', () {
-      final entry = FTPEntry.parse(
-          '-rw-------    1 105      108        1024 Jan 10 11:50 file.zip',
-          ListCommand.list);
-      expect(entry.type, FTPEntryType.file);
-      expect(entry.permission, 'rw-------');
-      expect(entry.name, 'file.zip');
-      expect(entry.owner, '105');
-      expect(entry.group, '108');
-      expect(entry.size, 1024);
-      expect(entry.modifyTime, isA<DateTime>());
+  group('FTPEntry parsing', () {
+    test('parses an MLSD line', () {
+      final e = FTPEntry.parse(
+          'type=file;size=1024;modify=20200101120000; report.txt',
+          ListCommand.mlsd);
+      expect(e.name, 'report.txt');
+      expect(e.type, FTPEntryType.file);
+      expect(e.size, 1024);
+      expect(e.modifyTime, isNotNull);
     });
 
-    test('parses a directory entry', () {
-      final entry = FTPEntry.parse(
-          'drwxr-xr-x    2 105      108        4096 Jan 10 11:50 folder',
-          ListCommand.list);
-      expect(entry.type, FTPEntryType.dir);
-      expect(entry.name, 'folder');
+    test('parses an MLSD directory line', () {
+      final e = FTPEntry.parse('type=dir; docs', ListCommand.mlsd);
+      expect(e.name, 'docs');
+      expect(e.type, FTPEntryType.dir);
     });
 
-    test('parses negative file sizes without throwing', () {
-      final entry = FTPEntry.parse(
-          '-rw-r--r-- 1 owner group -213 Aug 26 16:31 File.txt',
+    test('parses a unix LIST line', () {
+      final e = FTPEntry.parse(
+          '-rw-r--r-- 1 owner group 213 Aug 26 2020 FileName.txt',
           ListCommand.list);
-      expect(entry.type, FTPEntryType.file);
-      expect(entry.size, -213);
-      expect(entry.name, 'File.txt');
+      expect(e.name, 'FileName.txt');
+      expect(e.type, FTPEntryType.file);
+      expect(e.size, 213);
+      expect(e.permission, 'rw-r--r--');
     });
 
-    test('parses IIS/SII server listings (dir and file)', () {
-      final dir = FTPEntry.parse(
-          '02-11-15  03:05PM      <DIR>     1410887680 directory',
+    test('parses a windows/SII LIST line', () {
+      final e = FTPEntry.parse(
+          '02-11-15  03:05PM       <DIR>          0 myFolder',
           ListCommand.list);
-      expect(dir.type, FTPEntryType.dir);
-      expect(dir.name, 'directory');
+      expect(e.name, 'myFolder');
+      expect(e.type, FTPEntryType.dir);
+    });
 
-      final file = FTPEntry.parse(
-          '02-11-15  03:05PM               1410887680 movie.avi',
-          ListCommand.list);
-      expect(file.type, FTPEntryType.file);
-      expect(file.name, 'movie.avi');
+    test('parses an NLST line as a bare name', () {
+      final e = FTPEntry.parse('justAName.txt', ListCommand.nlst);
+      expect(e.name, 'justAName.txt');
+      expect(e.type, FTPEntryType.unknown);
+    });
+
+    test('throws on a blank line', () {
+      expect(() => FTPEntry.parse('   ', ListCommand.mlsd),
+          throwsA(isA<FTPConnectException>()));
     });
 
     test('throws on an invalid LIST line', () {
-      expect(() => FTPEntry.parse('not a valid line', ListCommand.list),
+      expect(() => FTPEntry.parse('totally invalid', ListCommand.list),
           throwsA(isA<FTPConnectException>()));
     });
   });
 
-  group('FTPEntry.parse - MLSD', () {
-    test('parses attributes and name', () {
-      final entry = FTPEntry.parse(
-          'Type=dir;Modify=20150211035000;UNIX.owner=105;UNIX.group=108;Size=1024; folder',
-          ListCommand.mlsd);
-      expect(entry.type, FTPEntryType.dir);
-      expect(entry.name, 'folder');
-      expect(entry.owner, '105');
-      expect(entry.group, '108');
-      expect(entry.size, 1024);
-      expect(entry.modifyTime, isA<DateTime>());
+  group('FtpResponseReader', () {
+    const timeout = Duration(seconds: 2);
+
+    test('reads a single-line reply', () async {
+      final conn = _ScriptedConnection();
+      final reader = FtpResponseReader(conn, const Logger(), timeout);
+      conn.feed('220 Welcome\r\n');
+      final reply = await reader.readReply();
+      expect(reply.code, 220);
+      expect(reply.message, '220 Welcome');
+      await reader.dispose();
     });
 
-    test('round-trips through toString()', () {
-      final original = FTPEntry.parse(
-          'drw-------    1 105      108        1024 Jan 10 11:50 dir',
-          ListCommand.list);
-      final reparsed = FTPEntry.parse(original.toString(), ListCommand.mlsd);
-      expect(reparsed.type, FTPEntryType.dir);
-      expect(reparsed.owner, '105');
-      expect(reparsed.group, '108');
-      expect(reparsed.size, 1024);
+    test('reads two replies from one chunk in order', () async {
+      final conn = _ScriptedConnection();
+      final reader = FtpResponseReader(conn, const Logger(), timeout);
+      conn.feed('331 Need password\r\n230 Logged in\r\n');
+      expect((await reader.readReply()).code, 331);
+      expect((await reader.readReply()).code, 230);
+      await reader.dispose();
     });
-  });
 
-  group('FTPEntry.parse - NLST', () {
-    test('returns the raw name with unknown type', () {
-      final entry = FTPEntry.parse('some_file.txt', ListCommand.nlst);
-      expect(entry.name, 'some_file.txt');
-      expect(entry.type, FTPEntryType.unknown);
+    test('reassembles a reply split across chunks', () async {
+      final conn = _ScriptedConnection();
+      final reader = FtpResponseReader(conn, const Logger(), timeout);
+      final future = reader.readReply();
+      conn.feed('257 "/ho');
+      conn.feed('me" is cwd\r\n');
+      final reply = await future;
+      expect(reply.code, 257);
+      expect(reply.message, contains('/home'));
+      await reader.dispose();
     });
-  });
 
-  group('FTPEntry.parse - errors', () {
-    test('throws on blank input for every command', () {
-      for (final cmd in ListCommand.values) {
-        expect(
-            () => FTPEntry.parse('', cmd), throwsA(isA<FTPConnectException>()));
-      }
+    test('handles a multi-line reply and returns the terminating code',
+        () async {
+      final conn = _ScriptedConnection();
+      final reader = FtpResponseReader(conn, const Logger(), timeout);
+      conn.feed('211-Features:\r\n MLSD\r\n UTF8\r\n211 End\r\n');
+      final reply = await reader.readReply();
+      expect(reply.code, 211);
+      await reader.dispose();
     });
-  });
 
-  group('Logger', () {
-    test('does not throw whether enabled or not', () {
-      expect(() => Logger(isEnabled: false).log('hidden'), returnsNormally);
-      expect(() => Logger(isEnabled: true).log('shown'), returnsNormally);
+    test(
+        'a multi-line reply is not terminated early by an intermediate line '
+        'that looks like a different-code terminator', () async {
+      final conn = _ScriptedConnection();
+      final reader = FtpResponseReader(conn, const Logger(), timeout);
+      // The "150 opening data connection" line here is just server text
+      // inside a 211 multi-line reply; it must not be mistaken for the
+      // terminator of an unrelated 150 reply.
+      conn.feed('211-Status:\r\n'
+          '150 opening data connection\r\n'
+          '211 End\r\n');
+      final reply = await reader.readReply();
+      expect(reply.code, 211);
+      expect(reply.message, contains('150 opening data connection'));
+      await reader.dispose();
+    });
+
+    test('times out when no reply arrives', () async {
+      final conn = _ScriptedConnection();
+      final reader = FtpResponseReader(
+          conn, const Logger(), const Duration(milliseconds: 100));
+      expect(() => reader.readReply(), throwsA(isA<FTPConnectException>()));
+      await reader.dispose();
+    });
+
+    test('errors when the connection closes with no reply', () async {
+      final conn = _ScriptedConnection();
+      final reader = FtpResponseReader(conn, const Logger(), timeout);
+      final future = reader.readReply();
+      conn.done();
+      expect(future, throwsA(isA<FTPConnectException>()));
     });
   });
 }

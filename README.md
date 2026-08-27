@@ -25,6 +25,7 @@
 
 ## Key Features
 * Supports SFTP/FTP/FTPS/FTPES
+* Web support (via an HTTP API backend) with `FtpWebClient`
 * Upload files to the server
 * Download files/directories from the server
 * List directory contents
@@ -35,18 +36,23 @@ This library is originally based on <a href="https://github.com/Nexific/dart_ftp
 </p>
 
 ## Example upload file
-### Example 1:
+### Example 1: config-driven, protocol-agnostic (recommended)
+Build the client from a config with `fromConfig`. On native, both `FTPConnect`
+and `SFTPConnect` implement `FileTransferClient`, so you can swap FTP/SFTP by
+changing only the config and keep the full `File`-based API:
 ```dart
 import 'dart:io';
 import 'package:ftpconnect/ftpconnect.dart';
 
-main() async{
-    FTPConnect ftpConnect = FTPConnect('example.com',user:'user', pass:'pass');
-    File fileToUpload = File('fileToUpload.txt');
-    await ftpConnect.connect();
-    bool res = await ftpConnect.uploadFile(fileToUpload);
-    await ftpConnect.disconnect();
-    print(res);
+main() async {
+  final FileTransferClient client = FTPConnect.fromConfig(
+    FtpConfig(host: 'example.com', user: 'user', pass: 'pass'),
+    // swap to SFTP with: SFTPConnect.fromConfig(SftpConfig(host: 'example.com', ...))
+  );
+  await client.connect();
+  bool res = await client.uploadFile(File('fileToUpload.txt'));
+  await client.disconnect();
+  print(res);
 }
 ```
 
@@ -69,18 +75,19 @@ main() async{
 ```
 
 ## Download file
-### Example 1:
+### Example 1: config-driven (recommended)
 ```dart
 import 'dart:io';
 import 'package:ftpconnect/ftpconnect.dart';
 
-main() async{
-    FTPConnect ftpConnect = FTPConnect('example.com',user:'user', pass:'pass');
-    String fileName = 'toDownload.txt';
-    await ftpConnect.connect();
-    bool res = await ftpConnect.downloadFile(fileName, File('myFileFromFTP.txt'));
-    await ftpConnect.disconnect();
-    print(res);
+main() async {
+  final FileTransferClient client = FTPConnect.fromConfig(
+    FtpConfig(host: 'example.com', user: 'user', pass: 'pass'),
+  );
+  await client.connect();
+  bool res = await client.downloadFile('toDownload.txt', File('myFileFromFTP.txt'));
+  await client.disconnect();
+  print(res);
 }
 ```
 
@@ -185,6 +192,37 @@ final Uint8List bytes = await ftpConnect.downloadToBytes('remote.bin');
 
 More details [here](https://pub.dev/documentation/ftpconnect/latest/ftpconnect/ftpconnect-library.html).
 
+## Config-driven creation (`fromConfig`)
+
+Instead of long named-parameter constructors, you can describe an endpoint with a
+config object and build the client with a `fromConfig` constructor. Each returns
+the **fully-typed** concrete client (with its complete API):
+
+```dart
+import 'package:ftpconnect/ftpconnect.dart';
+
+final ftp  = FTPConnect.fromConfig(FtpConfig(host: 'example.com', user: 'u', pass: 'p'));
+final sftp = SFTPConnect.fromConfig(SftpConfig(host: 'example.com', privateKey: '...'));
+final web  = FtpWebClient.fromConfig(WebConfig(host: 'ftp.example.com', protocol: WebProtocol.sftp));
+```
+
+* `FtpConfig`  → `FTPConnect`   (FTP / FTPS / FTPES)
+* `SftpConfig` → `SFTPConnect`  (SFTP)
+* `WebConfig`  → `FtpWebClient` (HTTP proxy backend, see [Web support](#web-support))
+
+On native, `FTPConnect` and `SFTPConnect` both implement `FileTransferClient`
+(which extends the web-safe `FileTransferProtocol` and adds the `dart:io`
+`File`/`Directory` helpers), so you can write protocol-agnostic code that still
+has the full API:
+
+```dart
+final FileTransferClient client = useSftp
+    ? SFTPConnect.fromConfig(SftpConfig(host: host, user: user, pass: pass))
+    : FTPConnect.fromConfig(FtpConfig(host: host, user: user, pass: pass));
+await client.connect();
+await client.uploadFile(File('local.txt'));
+```
+
 ## SFTP support
 
 SFTP is provided by the `SFTPConnect` class, powered by the pure-Dart
@@ -249,6 +287,83 @@ SFTPConnect sftpConnect = SFTPConnect(
 ```
 
 # [View more Examples](https://github.com/salim-lachdhaf/dartFTP/tree/master/example)
+
+## Web support
+
+Browsers (and Flutter Web) cannot open raw FTP or SSH/TCP sockets, so the
+default `FTPConnect` / `SFTPConnect` clients — which rely on `dart:io` — do not
+run on the web. To support the web platform, the package ships a separate,
+`dart:io`-free client, **`FtpWebClient`**, that delegates every FTP/SFTP
+operation to a remote HTTP API (for example a FastAPI backend) which performs
+the actual transfers on the server side.
+
+Import the dedicated web entry point instead of the default one:
+
+```dart
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:ftpconnect/ftpconnect_web.dart';
+
+main() async {
+  final client = FtpWebClient(
+    // baseUrl defaults to https://me.test.ftpweb.com (the proxy/API server).
+    // Pass baseUrl: '...' to point at a different proxy.
+    host: 'ftp.example.com',      // remote FTP/SFTP host the proxy connects to
+    user: 'user',
+    pass: 'pass',
+    protocol: WebProtocol.sftp,   // ftp | ftps | ftpes | sftp
+    showLog: true,
+    // headers: {'Authorization': 'Bearer <token>'}, // optional API auth
+  );
+
+  try {
+    await client.connect();
+
+    // Upload in-memory bytes (there is no dart:io File on the web).
+    final Uint8List data = Uint8List.fromList(utf8.encode('Hello Web FTP!'));
+    await client.uploadData(data, 'hello.txt');
+
+    // List a remote directory.
+    final content = await client.listDirectoryContent('.');
+    print(content);
+
+    // Download a remote file back into memory.
+    final bytes = await client.downloadToBytes('hello.txt');
+
+    await client.disconnect();
+  } finally {
+    client.dispose();
+  }
+}
+```
+
+### Configuring the API endpoints
+
+The web client talks to your server through a small set of REST endpoints whose
+names are configurable via `FtpWebRoutes` (the defaults are placeholders). Once
+your final endpoint names are known, override only what you need:
+
+```dart
+final client = FtpWebClient(
+  host: 'ftp.example.com',
+  routes: const FtpWebRoutes(
+    connect: 'api/v1/sessions',
+    upload: 'api/v1/sessions/upload',
+    // ...only override the ones that differ from the defaults
+  ),
+);
+```
+
+> The proxy `baseUrl` defaults to `https://me.test.ftpweb.com`. The `host` is the
+> **destination** FTP/SFTP server (forwarded to the proxy); the proxy — not the
+> browser — opens the actual FTP/SFTP connection.
+
+Because a browser upload is a single multipart request, `FtpWebClient` supports
+the byte/path oriented subset of the API (`uploadData`, `downloadToBytes`,
+listing, `mkdir`, `rename`, `delete`, `exists`, `size`, ...). The `dart:io`
+`File`/`Directory` helpers of `FTPConnect`/`SFTPConnect` are intentionally not
+part of the web client — use `Uint8List` bytes instead.
+
 
 ## Support
 

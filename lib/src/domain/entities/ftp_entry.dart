@@ -1,9 +1,10 @@
-import 'package:dartssh2/dartssh2.dart';
 import 'package:intl/intl.dart';
 
-import 'ftp_exceptions.dart';
-import 'ftp_enums.dart';
+import '../enums.dart';
+import '../exceptions.dart';
 
+/// A remote file-system entry (file, directory or link) returned when listing
+/// the content of a remote directory.
 class FTPEntry {
   final String name;
   final DateTime? modifyTime;
@@ -34,67 +35,58 @@ class FTPEntry {
       r"(.+)$" //file/ dir name [4]
       );
 
-  // Hide constructor
-  FTPEntry._(
-      this.name,
-      this.modifyTime,
-      this.permission,
-      this.type,
-      this.size,
-      this.unique,
-      this.group,
-      this.gid,
-      this.mode,
-      this.owner,
-      this.uid,
-      this.additionalProperties);
+  const FTPEntry._(
+    this.name,
+    this.modifyTime,
+    this.permission,
+    this.type,
+    this.size,
+    this.unique,
+    this.group,
+    this.gid,
+    this.mode,
+    this.owner,
+    this.uid,
+    this.additionalProperties,
+  );
 
-  /// Builds an [FTPEntry] from a single SFTP listing entry ([SftpName])
-  /// returned by the `dartssh2` package (`SftpClient.listdir`).
-  factory FTPEntry.sftp(SftpName file) {
-    final SftpFileAttrs attr = file.attr;
-
-    FTPEntryType type;
-    if (attr.isDirectory) {
-      type = FTPEntryType.dir;
-    } else if (attr.isSymbolicLink) {
-      type = FTPEntryType.link;
-    } else {
-      type = FTPEntryType.file;
-    }
-
-    final DateTime? modifyTime = attr.modifyTime != null
-        ? DateTime.fromMillisecondsSinceEpoch(attr.modifyTime! * 1000)
-        : null;
-    final String? mode = attr.mode?.toString();
-
-    return FTPEntry._(
-      file.filename,
-      modifyTime,
-      mode,
-      type,
-      attr.size,
-      null,
-      null,
-      attr.groupID,
-      mode,
-      null,
-      attr.userID,
-      {},
-    );
+  /// Builds an [FTPEntry] from primitive values.
+  ///
+  /// Used by transport adapters (e.g. the SFTP adapter) to convert their own
+  /// listing representation into the package entity, keeping the domain free of
+  /// any transport-specific type.
+  factory FTPEntry.details({
+    required String name,
+    required FTPEntryType type,
+    DateTime? modifyTime,
+    int? size,
+    String? permission,
+    String? mode,
+    int? gid,
+    int? uid,
+    String? group,
+    String? owner,
+    String? unique,
+    Map<String, String>? additionalProperties,
+  }) {
+    return FTPEntry._(name, modifyTime, permission, type, size, unique, group,
+        gid, mode, owner, uid, additionalProperties ?? const {});
   }
 
+  /// Parses a single listing [responseLine] returned by [cmd].
   factory FTPEntry.parse(String responseLine, ListCommand cmd) {
     if (responseLine.trim().isEmpty) {
-      throw FTPConnectException("Can't parse a null or blank response line");
+      throw const FTPConnectException(
+          "Can't parse a null or blank response line");
     }
-    if (cmd == ListCommand.list) {
-      return FTPEntry._parseListCommand(responseLine);
-    } else if (cmd == ListCommand.nlst) {
-      return FTPEntry._(responseLine, null, null, FTPEntryType.unknown, null,
-          null, null, null, null, null, null, null);
-    } else {
-      return FTPEntry._parseMLSDCommand(responseLine);
+    switch (cmd) {
+      case ListCommand.list:
+        return FTPEntry._parseListCommand(responseLine);
+      case ListCommand.nlst:
+        return FTPEntry._(responseLine, null, null, FTPEntryType.unknown, null,
+            null, null, null, null, null, null, const {});
+      case ListCommand.mlsd:
+        return FTPEntry._parseMLSDCommand(responseLine);
     }
   }
 
@@ -112,7 +104,6 @@ class FTPEntry {
     int uid = -1;
     Map<String, String> additional = {};
 
-    // Split and trim line
     responseLine.trim().split(';').forEach((property) {
       final prop = property
           .split('=')
@@ -120,10 +111,8 @@ class FTPEntry {
           .toList(growable: false);
 
       if (prop.length == 1) {
-        // Name
         name = prop[0];
       } else {
-        // Other attributes
         switch (prop[0].toLowerCase()) {
           case 'modify':
             final String date =
@@ -196,105 +185,73 @@ class FTPEntry {
   factory FTPEntry._parseLIST(final String responseLine) {
     String name = "";
     DateTime? modifyTime;
-    String? persmission;
+    String? permission;
     FTPEntryType type = FTPEntryType.unknown;
     int size = 0;
-    String? unique;
-    String? group;
-    int gid = -1;
-    String? mode;
     String? owner;
-    int uid = -1;
+    String? group;
 
-    Iterable<Match> matches = regexpLIST.allMatches(responseLine);
-    for (Match match in matches) {
-      if (match.group(1) == "-") {
-        type = FTPEntryType.file;
-      } else if (match.group(1) == "d") {
-        type = FTPEntryType.dir;
-      } else {
-        type = FTPEntryType.link;
-      }
-
-      //permission
-      persmission = match.group(2);
-      //nb files
-      //var nbFiles = match.group(3);
-      //owner
-      owner = match.group(4);
-      //group
-      group = match.group(5);
-      //size
-      size = int.tryParse(match.group(6)!) ?? 0;
-      //date
-      String date = (match.group(7)!.split(" ")..removeWhere((i) => i.isEmpty))
-          .join(" "); //keep only one space
-      //insert year
-      if (date.contains(':')) date = '$date ${DateTime.now().year}';
-      var format = date.contains(':') ? 'MMM dd hh:mm yyyy' : 'MMM dd yyyy';
-      modifyTime = DateFormat(format, 'en_US').parse(date);
-      //file/dir name
-      name = match.group(8)!;
+    final Match match = regexpLIST.allMatches(responseLine).first;
+    if (match.group(1) == "-") {
+      type = FTPEntryType.file;
+    } else if (match.group(1) == "d") {
+      type = FTPEntryType.dir;
+    } else {
+      type = FTPEntryType.link;
     }
-    return FTPEntry._(name, modifyTime, persmission, type, size, unique, group,
-        gid, mode, owner, uid, {});
+
+    permission = match.group(2);
+    owner = match.group(4);
+    group = match.group(5);
+    size = int.tryParse(match.group(6)!) ?? 0;
+
+    String date =
+        (match.group(7)!.split(" ")..removeWhere((i) => i.isEmpty)).join(" ");
+    if (date.contains(':')) date = '$date ${DateTime.now().year}';
+    final String format =
+        date.contains(':') ? 'MMM dd hh:mm yyyy' : 'MMM dd yyyy';
+    modifyTime = DateFormat(format, 'en_US').parse(date);
+    name = match.group(8)!;
+
+    return FTPEntry._(name, modifyTime, permission, type, size, null, group, -1,
+        null, owner, -1, const {});
   }
 
   factory FTPEntry._parseLISTiis(final String responseLine) {
     String name = "";
     DateTime? modifyTime;
-    String? persmission;
     FTPEntryType type = FTPEntryType.unknown;
     int size = 0;
-    String? unique;
-    String? group;
-    int gid = -1;
-    String? mode;
-    String? owner;
-    int uid = -1;
-    Iterable<Match> matches = regexpLISTSiiServers.allMatches(responseLine);
-    for (Match match in matches) {
-      //date
-      String date =
-          match.group(1)!.split(" ").fold('', (previousValue, element) {
-        //keep only one space and add fullyear if only last 2 digits in year
-        if (element.isEmpty) return previousValue;
-        if (previousValue.isEmpty) {
-          return element.length <= 8
-              ? element.substring(0, 6) +
-                  DateTime.now().year.toString().substring(0, 2) +
-                  element.substring(6, 8)
-              : element;
-        }
-        return '$previousValue $element';
-      });
-      modifyTime = DateFormat('MM-dd-yyyy hh:mma').parse(date);
 
-      //type
-      if (match.group(2)!.trim().isEmpty) {
-        type = FTPEntryType.file;
-      } else if (match.group(2)!.toLowerCase().contains("dir")) {
-        type = FTPEntryType.dir;
-      } else {
-        type = FTPEntryType.link;
+    final Match match = regexpLISTSiiServers.allMatches(responseLine).first;
+    String date = match.group(1)!.split(" ").fold('', (previousValue, element) {
+      if (element.isEmpty) return previousValue;
+      if (previousValue.isEmpty) {
+        return element.length <= 8
+            ? element.substring(0, 6) +
+                DateTime.now().year.toString().substring(0, 2) +
+                element.substring(6, 8)
+            : element;
       }
-      //size
-      size = int.tryParse(match.group(3)!) ?? 0;
+      return '$previousValue $element';
+    });
+    modifyTime = DateFormat('MM-dd-yyyy hh:mma').parse(date);
 
-      //file/dir name
-      name = match.group(4)!;
+    if (match.group(2)!.trim().isEmpty) {
+      type = FTPEntryType.file;
+    } else if (match.group(2)!.toLowerCase().contains("dir")) {
+      type = FTPEntryType.dir;
+    } else {
+      type = FTPEntryType.link;
     }
-    return FTPEntry._(name, modifyTime, persmission, type, size, unique, group,
-        gid, mode, owner, uid, {});
+    size = int.tryParse(match.group(3)!) ?? 0;
+    name = match.group(4)!;
+
+    return FTPEntry._(name, modifyTime, null, type, size, null, null, -1, null,
+        null, -1, const {});
   }
 
   @override
   String toString() =>
       'name=$name;modify=$modifyTime;perm=$permission;type=${type.describeEnum.toLowerCase()};size=$size;unique=$unique;unix.group=$group;unix.mode=$mode;unix.owner=$owner;unix.uid=$uid;unix.gid=$gid';
-}
-
-enum FTPEntryType { file, dir, link, unknown }
-
-extension FtpEntryTypeEnum on FTPEntryType {
-  String get describeEnum => name;
 }
