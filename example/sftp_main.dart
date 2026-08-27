@@ -39,7 +39,8 @@ void main() async {
       await log('Uploading ...');
       await sftpConnect.uploadFile(
         fileToUpload,
-        onProgress: (percent, transferred, total) => print('progress: $percent%'),
+        onProgress: (percent, transferred, total) =>
+            print('progress: $percent%'),
       );
       await log('file uploaded sucessfully');
       await sftpConnect.disconnect();
@@ -70,7 +71,8 @@ void main() async {
       await sftpConnect.downloadFile(
         'toDownload.txt',
         downloadedFile,
-        onProgress: (percent, transferred, total) => print('progress: $percent%'),
+        onProgress: (percent, transferred, total) =>
+            print('progress: $percent%'),
       );
       await log('file downloaded path: ${downloadedFile.path}');
       await sftpConnect.disconnect();

@@ -121,7 +121,8 @@ class FTPConnect extends FileTransferClient {
     String sRemoteName, {
     FileProgress? onProgress,
   }) {
-    return FTPFile(_socket).downloadToBytes(sRemoteName, onProgress: onProgress);
+    return FTPFile(_socket)
+        .downloadToBytes(sRemoteName, onProgress: onProgress);
   }
 
   /// Create a new Directory with the Name of [sDirectory] in the current directory.

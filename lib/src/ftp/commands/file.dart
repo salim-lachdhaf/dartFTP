@@ -61,32 +61,14 @@ class FTPFile {
     FileProgress? onProgress,
   }) async {
     _socket.logger.log('Download $sRemoteName to ${fLocalFile.path}');
-    //check for file existence and init totalData to receive
-    int fileSize = await size(sRemoteName);
-    if (fileSize == -1) {
-      throw FTPConnectException('Remote File $sRemoteName does not exist!');
+    await fLocalFile.parent.create(recursive: true);
+    final IOSink sink = fLocalFile.openWrite(mode: FileMode.writeOnly);
+    try {
+      await _download(sRemoteName, sink.add, onProgress: onProgress);
+    } finally {
+      await sink.flush();
+      await sink.close();
     }
-
-    await _socket.transferData('RETR $sRemoteName', (Socket dataSocket) async {
-      // Listen mode is used so we can report the downloaded amount back.
-      _socket.logger.log('Start downloading...');
-      await fLocalFile.parent.create(recursive: true);
-      final IOSink sink = fLocalFile.openWrite(mode: FileMode.writeOnly);
-      var received = 0;
-      try {
-        await dataSocket.listen((data) {
-          sink.add(data);
-          if (onProgress != null) {
-            received += data.length;
-            onProgress(Utils.percent(received, fileSize), received, fileSize);
-          }
-        }).asFuture();
-      } finally {
-        await sink.flush();
-        await sink.close();
-      }
-    });
-
     _socket.logger.log('File Downloaded!');
     return true;
   }
@@ -97,27 +79,39 @@ class FTPFile {
     FileProgress? onProgress,
   }) async {
     _socket.logger.log('Download $sRemoteName to memory');
+    final BytesBuilder builder = BytesBuilder(copy: false);
+    await _download(sRemoteName, builder.add, onProgress: onProgress);
+    _socket.logger.log('File Downloaded!');
+    return builder.takeBytes();
+  }
+
+  /// Streams the remote file [sRemoteName] over a RETR data connection, handing
+  /// each chunk to [onChunk] and reporting progress. Shared by [download] and
+  /// [downloadToBytes] so file-based and in-memory downloads use the exact same
+  /// path (and both stay streamed instead of buffering the whole payload).
+  Future<void> _download(
+    String? sRemoteName,
+    void Function(List<int> chunk) onChunk, {
+    FileProgress? onProgress,
+  }) async {
     //check for file existence and init totalData to receive
-    int fileSize = await size(sRemoteName);
+    final int fileSize = await size(sRemoteName);
     if (fileSize == -1) {
       throw FTPConnectException('Remote File $sRemoteName does not exist!');
     }
 
-    final BytesBuilder builder = BytesBuilder(copy: false);
     await _socket.transferData('RETR $sRemoteName', (Socket dataSocket) async {
+      // Listen mode is used so we can report the downloaded amount back.
       _socket.logger.log('Start downloading...');
       var received = 0;
       await dataSocket.listen((data) {
-        builder.add(data);
+        onChunk(data);
         if (onProgress != null) {
           received += data.length;
           onProgress(Utils.percent(received, fileSize), received, fileSize);
         }
       }).asFuture();
     });
-
-    _socket.logger.log('File Downloaded!');
-    return builder.takeBytes();
   }
 
   /// Upload the in-memory bytes [data] to the current directory as [remoteName].

@@ -125,16 +125,16 @@ class SFTPConnect extends FileTransferClient {
       // Ignore
     }
 
-      // Observe `done` as well: it may complete with an error while channels
-      // are being torn down, and an unobserved error would escape to the zone.
-      unawaited(_client?.done.catchError((_) {}));
-      try {
-        await _client?.close();
-      } catch (_) {
-        // Ignore
-      }
-      _sftp = null;
-      _client = null;
+    // Observe `done` as well: it may complete with an error while channels
+    // are being torn down, and an unobserved error would escape to the zone.
+    unawaited(_client?.done.catchError((_) {}));
+    try {
+      await _client?.close();
+    } catch (_) {
+      // Ignore
+    }
+    _sftp = null;
+    _client = null;
 
     logger.log('Disconnected!');
     return true;
@@ -328,24 +328,14 @@ class SFTPConnect extends FileTransferClient {
     }
     logger.log('Download $sRemoteName to ${fFile.path}');
 
-    final String remotePath = _resolve(sRemoteName);
-    final int total = await sizeFile(sRemoteName);
-    if (total == -1) {
-      throw FTPConnectException('Remote File $sRemoteName does not exist!');
-    }
-
     await fFile.parent.create(recursive: true);
     final IOSink sink = fFile.openWrite();
-
-    await sftpClient.download(
-      remotePath,
-      sink,
-      onProgress: onProgress == null
-          ? null
-          : (int read) => onProgress(Utils.percent(read, total), read, total),
-      closeDestination: true,
-    );
-
+    try {
+      await _download(sRemoteName, sink.add, onProgress: onProgress);
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
     logger.log('File Downloaded!');
     return true;
   }
@@ -405,6 +395,20 @@ class SFTPConnect extends FileTransferClient {
     FileProgress? onProgress,
   }) async {
     logger.log('Download $sRemoteName to memory');
+    final BytesBuilder builder = BytesBuilder(copy: false);
+    await _download(sRemoteName, builder.add, onProgress: onProgress);
+    logger.log('File Downloaded!');
+    return builder.takeBytes();
+  }
+
+  /// Streams the remote file [sRemoteName], handing each chunk to [onChunk] and
+  /// reporting progress. Shared by [downloadFile] and [downloadToBytes] so
+  /// file-based and in-memory downloads use the exact same (streamed) path.
+  Future<void> _download(
+    String sRemoteName,
+    void Function(Uint8List chunk) onChunk, {
+    FileProgress? onProgress,
+  }) async {
     final String remotePath = _resolve(sRemoteName);
     final int total = await sizeFile(sRemoteName);
     if (total == -1) {
@@ -413,17 +417,14 @@ class SFTPConnect extends FileTransferClient {
 
     final SftpFile remoteFile = await sftpClient.open(remotePath);
     try {
-      final BytesBuilder builder = BytesBuilder(copy: false);
       var read = 0;
       await for (final Uint8List chunk in remoteFile.read()) {
-        builder.add(chunk);
+        onChunk(chunk);
         if (onProgress != null) {
           read += chunk.length;
           onProgress(Utils.percent(read, total), read, total);
         }
       }
-      logger.log('File Downloaded!');
-      return builder.takeBytes();
     } finally {
       await remoteFile.close();
     }
@@ -472,7 +473,8 @@ class SFTPConnect extends FileTransferClient {
         final String name = p.basename(entity.path);
         final String remoteChild = p.posix.join(remoteDir, name);
         if (entity is File) {
-          await uploadFile(entity, sRemoteName: remoteChild, onProgress: onProgress);
+          await uploadFile(entity,
+              sRemoteName: remoteChild, onProgress: onProgress);
         } else if (entity is Directory) {
           await uploadDir(entity, remoteChild);
         }

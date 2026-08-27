@@ -22,8 +22,10 @@ class FTPSocket {
   late RawSocket _socket;
 
   FTPSocket(this.host, this.port, this.securityType, this.logger, this.timeout,
-      {this.supportIPV6 = false, this.listCommand = ListCommand.mlsd,
-        this.transferMode = TransferMode.passive, this.transferType = TransferType.auto});
+      {this.supportIPV6 = false,
+      this.listCommand = ListCommand.mlsd,
+      this.transferMode = TransferMode.passive,
+      this.transferType = TransferType.auto});
 
   /// Read the FTP Server response from the Stream
   ///
