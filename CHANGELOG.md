@@ -1,4 +1,4 @@
-## [2.3.0] - 2026.08.27
+## [3.0.0] - 2026.08.27
 * Add `uploadDirectory` to recursively upload a local folder to the server (FTP & SFTP)
 * Add in-memory transfers: `uploadData(Uint8List, ...)` and `downloadToBytes(...)` (FTP & SFTP)
 * Add `deleteNonEmptyDirectory` to recursively delete a folder without throwing when it is missing
