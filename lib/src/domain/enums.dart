@@ -31,17 +31,3 @@ extension WebProtocolName on WebProtocol {
   /// Wire value sent to the API server (`ftp`, `ftps`, `ftpes`, `sftp`).
   String get wireName => name;
 }
-
-extension SecurityTypeToWebProtocol on SecurityType {
-  /// The equivalent [WebProtocol] used when routing this FTP security type
-  /// through the web proxy backend.
-  WebProtocol get webProtocol => switch (this) {
-        SecurityType.ftp => WebProtocol.ftp,
-        SecurityType.ftps => WebProtocol.ftps,
-        SecurityType.ftpes => WebProtocol.ftpes,
-      };
-}
-
-extension FtpEntryTypeName on FTPEntryType {
-  String get describeEnum => name;
-}

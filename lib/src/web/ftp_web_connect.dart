@@ -1,17 +1,9 @@
 import 'dart:typed_data';
 
+import 'package:ftpconnect/ftpconnect.dart';
 import 'package:path/path.dart' as p;
 
-import '../config/transfer_config.dart';
-import '../domain/entities/ftp_entry.dart';
-import '../domain/enums.dart';
-import '../domain/exceptions.dart';
-import '../domain/file_transfer_protocol.dart';
-import '../domain/logger.dart';
-import '../domain/progress.dart';
 import '../utils/utils.dart';
-import 'web_api_client.dart';
-import 'web_api_routes.dart';
 
 /// A web-safe FTP/SFTP client.
 ///

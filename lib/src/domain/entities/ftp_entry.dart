@@ -253,5 +253,5 @@ class FTPEntry {
 
   @override
   String toString() =>
-      'name=$name;modify=$modifyTime;perm=$permission;type=${type.describeEnum.toLowerCase()};size=$size;unique=$unique;unix.group=$group;unix.mode=$mode;unix.owner=$owner;unix.uid=$uid;unix.gid=$gid';
+      'name=$name;modify=$modifyTime;perm=$permission;type=${type.name.toLowerCase()};size=$size;unique=$unique;unix.group=$group;unix.mode=$mode;unix.owner=$owner;unix.uid=$uid;unix.gid=$gid';
 }
