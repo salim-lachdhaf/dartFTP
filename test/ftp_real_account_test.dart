@@ -21,21 +21,30 @@ void main() {
   const String pass = 'pHo8uO0oxtbHT4zoSqh0OxPHaoKljJ82';
 
   const String testFileDir = 'test/FTP_tmp';
-  const String remoteWorkingDir = 'FtpTestTmp';
   late Directory tempDir;
   late FTPConnect ftpConnect;
+  late String remoteWorkingDir;
 
   setUp(() async {
     tempDir = Directory(testFileDir)..createSync(recursive: true);
     ftpConnect =
         FTPConnect(host, port: port, user: user, pass: pass, timeout: 120);
     expect(await ftpConnect.connect(), isTrue);
+    // unique per-test name: avoids collisions if this suite (or another CI
+    // run against the same account) executes concurrently/retried
+    remoteWorkingDir = 'FtpTestTmp_${DateTime.now().microsecondsSinceEpoch}';
     // isolate all remote operations inside a dedicated remote working dir
-    await ftpConnect.makeDirectory(remoteWorkingDir);
+    expect(await ftpConnect.makeDirectory(remoteWorkingDir), isTrue);
     expect(await ftpConnect.changeDirectory('/$remoteWorkingDir'), isTrue);
   });
 
   tearDown(() async {
+    try {
+      // cd out first: a server cannot delete the directory it is currently
+      // positioned in, so leaving the cwd inside it would make the delete
+      // fail (or race with the next test's setUp reusing the connection).
+      await ftpConnect.changeDirectory('/');
+    } catch (_) {}
     try {
       await ftpConnect.deleteNonEmptyDirectory('/$remoteWorkingDir');
     } catch (_) {}
@@ -138,19 +147,23 @@ void main() {
     await File('${localUpload.path}/nested/child.txt')
         .writeAsString('nested file');
 
-    expect(await ftpConnect.uploadDirectory(localUpload, 'remote_dir_test'),
-        isTrue);
-    expect(await ftpConnect.checkFolderExistence('remote_dir_test'), isTrue);
+    // unique per-run name: avoids collisions with any other test/run that
+    // may be sharing this remote working directory concurrently
+    final String remoteDir =
+        'remote_dir_test_${DateTime.now().microsecondsSinceEpoch}';
+
+    expect(await ftpConnect.uploadDirectory(localUpload, remoteDir), isTrue);
+    expect(await ftpConnect.checkFolderExistence(remoteDir), isTrue);
 
     final Directory localDownload = Directory('${tempDir.path}/dir_download');
-    expect(await ftpConnect.downloadDirectory('remote_dir_test', localDownload),
-        isTrue);
+    expect(
+        await ftpConnect.downloadDirectory(remoteDir, localDownload), isTrue);
     expect(await File('${localDownload.path}/root.txt').readAsString(),
         'root file');
     expect(await File('${localDownload.path}/nested/child.txt').readAsString(),
         'nested file');
 
-    expect(await ftpConnect.deleteNonEmptyDirectory('remote_dir_test'), isTrue);
-    expect(await ftpConnect.checkFolderExistence('remote_dir_test'), isFalse);
+    expect(await ftpConnect.deleteNonEmptyDirectory(remoteDir), isTrue);
+    expect(await ftpConnect.checkFolderExistence(remoteDir), isFalse);
   });
 }
