@@ -47,8 +47,8 @@ void main() {
   });
 
   test('uploads then downloads a file round-trip', () async {
-    final File local = File('${tempDir.path}/upload.txt')
-      ..writeAsStringSync('hello real ftp server');
+    final File local = File('${tempDir.path}/upload.txt');
+    await local.writeAsString('hello real ftp server');
 
     expect(
         await ftpConnect.uploadFile(local, sRemoteName: 'upload.txt'), isTrue);
@@ -90,8 +90,8 @@ void main() {
   });
 
   test('renames a remote file', () async {
-    final File local = File('${tempDir.path}/rename_me.txt')
-      ..writeAsStringSync('rename me');
+    final File local = File('${tempDir.path}/rename_me.txt');
+    await local.writeAsString('rename me');
 
     expect(await ftpConnect.uploadFile(local, sRemoteName: 'rename_me.txt'),
         isTrue);
@@ -133,10 +133,10 @@ void main() {
   test('uploads and downloads a directory recursively', () async {
     final Directory localUpload = Directory('${tempDir.path}/dir_upload')
       ..createSync(recursive: true);
-    File('${localUpload.path}/root.txt').writeAsStringSync('root file');
-    Directory('${localUpload.path}/nested').createSync(recursive: true);
-    File('${localUpload.path}/nested/child.txt')
-        .writeAsStringSync('nested file');
+    await File('${localUpload.path}/root.txt').writeAsString('root file');
+    await Directory('${localUpload.path}/nested').create(recursive: true);
+    await File('${localUpload.path}/nested/child.txt')
+        .writeAsString('nested file');
 
     expect(await ftpConnect.uploadDirectory(localUpload, 'remote_dir_test'),
         isTrue);
